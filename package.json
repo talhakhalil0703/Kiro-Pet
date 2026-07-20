@@ -1,0 +1,151 @@
+{
+  "name": "kiro-pet",
+  "displayName": "Kiro Pet",
+  "description": "An animated Kiro Ghosty that reflects local and Remote SSH chat activity above your desktop.",
+  "version": "0.1.1",
+  "publisher": "TalhaKhalil",
+  "license": "Unlicense",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/talhakhalil0703/Kiro-Pet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/talhakhal0703/Kiro-Pet/issues"
+  },
+  "homepage": "https://github.com/talhakhal0703/Kiro-Pet#readme",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "kiro",
+    "pet",
+    "chat",
+    "agent",
+    "overlay"
+  ],
+  "icon": "media/icon.png",
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": {
+      "supported": true
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:kiroPet.show",
+    "onCommand:kiroPet.hide"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kiroPet.show",
+        "title": "Show Pet",
+        "category": "Kiro Pet",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "kiroPet.hide",
+        "title": "Hide Pet",
+        "category": "Kiro Pet",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "kiroPet.toggleClickThrough",
+        "title": "Toggle Pet Click-Through",
+        "category": "Kiro Pet",
+        "icon": "$(cursor)"
+      },
+      {
+        "command": "kiroPet.resetPosition",
+        "title": "Reset Pet Position",
+        "category": "Kiro Pet",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "kiroPet.restart",
+        "title": "Restart Pet",
+        "category": "Kiro Pet",
+        "icon": "$(refresh)"
+      }
+    ],
+    "configuration": {
+      "title": "Kiro Pet",
+      "properties": {
+        "kiroPet.enabled": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Show the Kiro Pet desktop overlay."
+        },
+        "kiroPet.size": {
+          "type": "number",
+          "default": 148,
+          "minimum": 88,
+          "maximum": 240,
+          "scope": "application",
+          "description": "Pet size in logical pixels."
+        },
+        "kiroPet.clickThrough": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Let mouse input pass through the pet. Disable this to drag it."
+        },
+        "kiroPet.showActiveCount": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Show a badge when more than one chat needs attention."
+        },
+        "kiroPet.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Show Kiro Pet state in the IDE status bar."
+        },
+        "kiroPet.reviewDuration": {
+          "type": "number",
+          "default": 12,
+          "minimum": 2,
+          "maximum": 120,
+          "scope": "application",
+          "description": "Seconds to celebrate after a chat turn finishes."
+        },
+        "kiroPet.sessionsPath": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Advanced override for Kiro's session directory. Empty uses ~/.kiro/sessions."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run check && npm run build:extension && npm run build:native",
+    "build:extension": "node esbuild.mjs",
+    "build:native": "bash scripts/build-native.sh",
+    "check": "tsc --noEmit",
+    "compile:test": "node esbuild.test.mjs",
+    "smoke:native": "node scripts/smoke-native.mjs",
+    "test": "npm run compile:test && node --test dist-test/*.test.js",
+    "package": "npm run build && vsce package --no-dependencies",
+    "watch": "node esbuild.mjs --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/vscode": "^1.94.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}

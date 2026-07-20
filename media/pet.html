@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1"
+    />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --accent: #9f7aea;
+        --cyan: #19b7c9;
+        --danger: #e05263;
+        --ink: #17151c;
+        --success: #36a269;
+        --warning: #efa83a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: transparent;
+        user-select: none;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+      }
+
+      #stage {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        cursor: grab;
+        touch-action: none;
+      }
+
+      #stage:active {
+        cursor: grabbing;
+      }
+
+      #pet {
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: idle-float 3.2s ease-in-out infinite;
+      }
+
+      .body {
+        fill: #fbfbfd;
+        stroke: var(--ink);
+        stroke-linejoin: round;
+        stroke-width: 0.72;
+      }
+
+      .body-accent {
+        fill: none;
+        opacity: 0.8;
+        stroke: var(--accent);
+        stroke-linecap: round;
+        stroke-width: 0.65;
+      }
+
+      .eye {
+        fill: var(--ink);
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: blink 4.1s ease-in-out infinite;
+      }
+
+      .mouth {
+        fill: none;
+        opacity: 0;
+        stroke: var(--ink);
+        stroke-linecap: round;
+        stroke-width: 0.62;
+      }
+
+      .status-badge {
+        opacity: 0;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+
+      .badge-circle {
+        fill: var(--accent);
+        stroke: var(--ink);
+        stroke-width: 0.55;
+      }
+
+      .status-icon {
+        display: none;
+        fill: none;
+        stroke: white;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 0.75;
+      }
+
+      .work-dot {
+        fill: white;
+        stroke: none;
+      }
+
+      .failed-eye,
+      .waiting-eye {
+        display: none;
+        fill: none;
+        stroke: var(--ink);
+        stroke-linecap: round;
+        stroke-width: 0.75;
+      }
+
+      #count {
+        position: absolute;
+        top: 8%;
+        right: 8%;
+        display: none;
+        min-width: 24px;
+        height: 24px;
+        padding: 0 6px;
+        place-items: center;
+        border: 2px solid var(--ink);
+        border-radius: 12px;
+        background: var(--cyan);
+        color: #fff;
+        font: 700 13px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+        letter-spacing: 0;
+      }
+
+      body[data-state="running"] #pet {
+        animation: working 0.72s ease-in-out infinite;
+      }
+
+      body[data-state="running"] .eye {
+        animation: scan 1.15s ease-in-out infinite alternate;
+      }
+
+      body[data-state="running"] .status-badge,
+      body[data-state="waiting"] .status-badge,
+      body[data-state="review"] .status-badge,
+      body[data-state="failed"] .status-badge {
+        opacity: 1;
+      }
+
+      body[data-state="running"] .running-icon,
+      body[data-state="waiting"] .waiting-icon,
+      body[data-state="review"] .review-icon,
+      body[data-state="failed"] .failed-icon {
+        display: block;
+      }
+
+      body[data-state="running"] .work-dot:nth-child(1) {
+        animation: work-dot 0.9s 0s ease-in-out infinite;
+      }
+
+      body[data-state="running"] .work-dot:nth-child(2) {
+        animation: work-dot 0.9s 0.14s ease-in-out infinite;
+      }
+
+      body[data-state="running"] .work-dot:nth-child(3) {
+        animation: work-dot 0.9s 0.28s ease-in-out infinite;
+      }
+
+      body[data-state="waiting"] #pet {
+        animation: waiting 1.8s ease-in-out infinite;
+      }
+
+      body[data-state="waiting"] .badge-circle {
+        fill: var(--warning);
+      }
+
+      body[data-state="waiting"] .eye {
+        display: none;
+      }
+
+      body[data-state="waiting"] .waiting-eye {
+        display: block;
+      }
+
+      body[data-state="review"] #pet {
+        animation: celebrate 1.4s ease-in-out infinite;
+      }
+
+      body[data-state="review"] .badge-circle {
+        fill: var(--success);
+      }
+
+      body[data-state="review"] .mouth {
+        opacity: 1;
+      }
+
+      body[data-state="failed"] #pet {
+        animation: failed 2.4s ease-in-out infinite;
+      }
+
+      body[data-state="failed"] .badge-circle {
+        fill: var(--danger);
+      }
+
+      body[data-state="failed"] .body-accent {
+        stroke: var(--danger);
+      }
+
+      body[data-state="failed"] .eye {
+        display: none;
+      }
+
+      body[data-state="failed"] .failed-eye {
+        display: block;
+      }
+
+      @keyframes idle-float {
+        0%,
+        100% {
+          transform: translateY(1.2%);
+        }
+        50% {
+          transform: translateY(-1.8%) scaleY(1.01);
+        }
+      }
+
+      @keyframes blink {
+        0%,
+        43%,
+        47%,
+        100% {
+          transform: scaleY(1);
+        }
+        45% {
+          transform: scaleY(0.08);
+        }
+      }
+
+      @keyframes working {
+        0%,
+        100% {
+          transform: translate(-1.5%, 0) rotate(-1deg);
+        }
+        50% {
+          transform: translate(1.5%, -2%) rotate(1deg);
+        }
+      }
+
+      @keyframes scan {
+        from {
+          transform: translateX(-0.55px);
+        }
+        to {
+          transform: translateX(0.55px);
+        }
+      }
+
+      @keyframes work-dot {
+        0%,
+        100% {
+          opacity: 0.35;
+          transform: translateY(0);
+        }
+        50% {
+          opacity: 1;
+          transform: translateY(-0.55px);
+        }
+      }
+
+      @keyframes waiting {
+        0%,
+        100% {
+          transform: translateY(0) rotate(0);
+        }
+        35% {
+          transform: translateY(-2.4%) rotate(-1.5deg);
+        }
+        70% {
+          transform: translateY(0) rotate(1.5deg);
+        }
+      }
+
+      @keyframes celebrate {
+        0%,
+        100% {
+          transform: translateY(0) scale(1);
+        }
+        40% {
+          transform: translateY(-4%) scale(1.025);
+        }
+        65% {
+          transform: translateY(-1%) scale(0.995);
+        }
+      }
+
+      @keyframes failed {
+        0%,
+        100% {
+          transform: translateY(2.5%) rotate(1deg) scaleY(0.98);
+        }
+        50% {
+          transform: translateY(3.2%) rotate(-1deg) scaleY(0.965);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #pet,
+        .eye,
+        .work-dot {
+          animation-duration: 8s !important;
+        }
+      }
+    </style>
+  </head>
+  <body data-state="idle">
+    <div id="stage" role="img" aria-label="Kiro Pet is idle">
+      <svg
+        id="pet"
+        viewBox="-3 -3 27 30"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <path
+          class="body"
+          d="M3.80081 18.5661C1.32306 24.0572 6.59904 25.434 10.4904 22.2205C11.6339 25.8242 15.926 23.1361 17.4652 20.3445C20.8578 14.1915 19.4877 7.91459 19.1361 6.61988C16.7244 -2.20972 4.67055 -2.21852 2.59581 6.6649C2.11136 8.21946 2.10284 9.98752 1.82846 11.8233C1.69011 12.749 1.59258 13.3398 1.23436 14.3135C1.02841 14.8733 0.745043 15.3704 0.299833 16.2082C-0.391594 17.5095 -0.0998802 20.021 3.46397 18.7186V18.7195L3.80081 18.5661Z"
+        />
+        <path
+          class="body-accent"
+          d="M3.55 18.72C5.6 18.2 8.5 18.7 10.5 22.2C12 19.6 15.3 19.7 17.4 20.3"
+        />
+
+        <ellipse class="eye" cx="10.96" cy="8.55" rx="1.05" ry="1.75" />
+        <ellipse class="eye" cx="15.03" cy="8.55" rx="1.05" ry="1.75" />
+        <path class="waiting-eye" d="M9.9 8.6h2.15M13.95 8.6h2.15" />
+        <path class="failed-eye" d="m9.9 7.9 1.9 1.5m0-1.5-1.9 1.5" />
+        <path class="failed-eye" d="m14 7.9 1.9 1.5m0-1.5L14 9.4" />
+        <path class="mouth" d="M11.8 12.2c.65.7 1.45.7 2.1 0" />
+
+        <g class="status-badge" transform="translate(-0.4 -0.2)">
+          <circle class="badge-circle" cx="3.2" cy="3.2" r="2.65" />
+          <g class="status-icon running-icon">
+            <circle class="work-dot" cx="2.1" cy="3.2" r="0.35" />
+            <circle class="work-dot" cx="3.2" cy="3.2" r="0.35" />
+            <circle class="work-dot" cx="4.3" cy="3.2" r="0.35" />
+          </g>
+          <path class="status-icon waiting-icon" d="M3.2 1.75v1.7M3.2 4.65v.05" />
+          <path class="status-icon review-icon" d="m1.75 3.2.9.95 1.95-2.1" />
+          <path class="status-icon failed-icon" d="m2.15 2.15 2.1 2.1m0-2.1-2.1 2.1" />
+        </g>
+      </svg>
+      <div id="count" aria-hidden="true"></div>
+    </div>
+    <script>
+      const stage = document.getElementById("stage");
+      const count = document.getElementById("count");
+
+      stage.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        window.webkit?.messageHandlers?.pet?.postMessage({
+          type: "dragStart"
+        });
+      });
+
+      window.kiroPet = {
+        setState(message) {
+          const state = message.state || "idle";
+          document.body.dataset.state = state;
+          stage.setAttribute("aria-label", message.label || "Kiro Pet");
+          stage.title = message.label || "Kiro Pet";
+
+          const total = Math.max(
+            message.activeCount || 0,
+            message.failedCount || 0,
+            message.reviewCount || 0
+          );
+          const showCount = message.showActiveCount && total > 1;
+          count.textContent = total > 99 ? "99+" : String(total);
+          count.style.display = showCount ? "grid" : "none";
+        }
+      };
+    </script>
+  </body>
+</html>

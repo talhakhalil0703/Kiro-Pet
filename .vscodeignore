@@ -1,0 +1,13 @@
+.git/**
+.github/**
+dist-test/**
+node_modules/**
+src/**
+test/**
+native/macos/KiroPetOverlay.swift
+scripts/**
+*.vsix
+tsconfig.json
+esbuild.mjs
+esbuild.test.mjs
+package-lock.json
