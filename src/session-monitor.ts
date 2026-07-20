@@ -1,6 +1,10 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import type { PetSnapshot, PetState } from "./types";
+import type {
+  PetNotification,
+  PetSnapshot,
+  PetState
+} from "./types";
 
 const MESSAGE_TAIL_BYTES = 128 * 1024;
 const ACTIVE_STALE_MS = 6 * 60 * 60 * 1000;
@@ -16,16 +20,21 @@ type KiroStatus =
   | "waiting_on_user";
 
 interface SessionRecord {
+  acknowledgedKey?: string;
   directory: string;
   failedUntil: number;
+  id: string;
   initialized: boolean;
   markerActive: boolean;
   markerMtimeMs: number;
   messageSize: number;
   metadataMtimeMs: number;
   metadataStatus?: KiroStatus;
+  pendingReviewKey?: string;
   reviewUntil: number;
   seenAtScan: number;
+  statusVersion: number;
+  title: string;
 }
 
 export interface SessionMonitorOptions {
@@ -68,6 +77,21 @@ export class SessionMonitor {
       clearInterval(this.interval);
       this.interval = undefined;
     }
+  }
+
+  public acknowledge(notificationId: string): void {
+    for (const record of this.records.values()) {
+      const now = this.now();
+      const notification = notificationFor(
+        record,
+        this.effectiveState(record, now)
+      );
+      if (notification?.id === notificationId) {
+        record.acknowledgedKey = alertKey(record);
+        record.pendingReviewKey = undefined;
+      }
+    }
+    this.emitSnapshot();
   }
 
   public async scan(): Promise<void> {
@@ -144,13 +168,16 @@ export class SessionMonitor {
       {
         directory,
         failedUntil: 0,
+        id: path.basename(directory),
         initialized: false,
         markerActive: false,
         markerMtimeMs: 0,
         messageSize: -1,
         metadataMtimeMs: 0,
         reviewUntil: 0,
-        seenAtScan: scanId
+        seenAtScan: scanId,
+        statusVersion: 0,
+        title: "Kiro chat"
       };
     record.seenAtScan = scanId;
 
@@ -181,11 +208,22 @@ export class SessionMonitor {
     const previousStatus = record.metadataStatus;
     try {
       const metadata = JSON.parse(await fs.readFile(metadataPath, "utf8")) as {
+        id?: unknown;
         status?: unknown;
+        title?: unknown;
       };
+      if (typeof metadata.id === "string") {
+        record.id = metadata.id;
+      }
+      if (typeof metadata.title === "string" && metadata.title.trim()) {
+        record.title = metadata.title.trim();
+      }
       record.metadataStatus = isKiroStatus(metadata.status)
         ? metadata.status
         : undefined;
+      if (record.metadataStatus !== previousStatus) {
+        record.statusVersion += 1;
+      }
       record.metadataMtimeMs = stat.mtimeMs;
     } catch {
       return;
@@ -211,6 +249,7 @@ export class SessionMonitor {
         record.metadataStatus !== "failed")
     ) {
       record.reviewUntil = this.now() + this.reviewDurationMs;
+      record.pendingReviewKey = `review:${stat.mtimeMs}`;
     }
   }
 
@@ -255,6 +294,7 @@ export class SessionMonitor {
 
     if (record.initialized && previousActive && !record.markerActive) {
       record.reviewUntil = this.now() + this.reviewDurationMs;
+      record.pendingReviewKey = `review:${stat.mtimeMs}`;
     }
   }
 
@@ -268,6 +308,10 @@ export class SessionMonitor {
         (state) => state === "running" || state === "waiting"
       ).length,
       failedCount: states.filter((state) => state === "failed").length,
+      notification: selectNotification(
+        [...this.records.values()],
+        (record) => this.effectiveState(record, now)
+      ),
       reviewCount: states.filter((state) => state === "review").length,
       state: aggregateState(states),
       waitingCount: states.filter((state) => state === "waiting").length
@@ -308,6 +352,73 @@ export class SessionMonitor {
       return "review";
     }
     return "idle";
+  }
+}
+
+function selectNotification(
+  records: SessionRecord[],
+  stateFor: (record: SessionRecord) => PetState
+): PetNotification | undefined {
+  const candidates = records
+    .map((record) => notificationFor(record, stateFor(record)))
+    .filter((value): value is PetNotification => value !== undefined);
+  const priority: Record<PetNotification["state"], number> = {
+    waiting: 0,
+    failed: 1,
+    review: 2,
+    running: 3
+  };
+  return candidates.sort(
+    (left, right) => priority[left.state] - priority[right.state]
+  )[0];
+}
+
+function notificationFor(
+  record: SessionRecord,
+  state: PetState
+): PetNotification | undefined {
+  const notificationState =
+    state === "waiting" || state === "failed"
+      ? state
+      : record.pendingReviewKey
+        ? "review"
+        : state === "running"
+          ? "running"
+          : undefined;
+  if (!notificationState) {
+    return undefined;
+  }
+  const persistent = notificationState !== "running";
+  if (persistent && record.acknowledgedKey === alertKey(record)) {
+    return undefined;
+  }
+  return {
+    id: `${record.id}:${alertKey(record)}`,
+    persistent,
+    sessionId: record.id,
+    state: notificationState,
+    statusText: statusText(notificationState),
+    title: record.title
+  };
+}
+
+function alertKey(record: SessionRecord): string {
+  return (
+    record.pendingReviewKey ??
+    `${record.metadataStatus ?? "idle"}:${record.statusVersion}`
+  );
+}
+
+function statusText(state: PetNotification["state"]): string {
+  switch (state) {
+    case "waiting":
+      return "Needs your input";
+    case "failed":
+      return "Chat failed";
+    case "review":
+      return "Ready to review";
+    case "running":
+      return "Kiro is working";
   }
 }
 

@@ -17,6 +17,16 @@ private struct OverlayCommand: Codable {
     let size: Double?
     let htmlPath: String?
     let label: String?
+    let notification: OverlayNotification?
+}
+
+private struct OverlayNotification: Codable {
+    let id: String
+    let persistent: Bool
+    let sessionId: String
+    let state: String
+    let statusText: String
+    let title: String
 }
 
 private final class PetPanel: NSPanel {
@@ -88,6 +98,7 @@ private final class UDPListener {
 
 private protocol PetBridgeDelegate: AnyObject {
     func beginDrag()
+    func openNotification()
 }
 
 private final class PetBridge: NSObject, WKScriptMessageHandler {
@@ -97,14 +108,16 @@ private final class PetBridge: NSObject, WKScriptMessageHandler {
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        guard
-            message.name == "pet",
-            let payload = message.body as? [String: Any],
-            payload["type"] as? String == "dragStart"
-        else {
+        guard message.name == "pet",
+              let payload = message.body as? [String: Any],
+              let type = payload["type"] as? String else {
             return
         }
-        delegate?.beginDrag()
+        if type == "dragStart" {
+            delegate?.beginDrag()
+        } else if type == "notificationClick" {
+            delegate?.openNotification()
+        }
     }
 }
 
@@ -125,14 +138,14 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
         configuration.userContentController.add(bridge, name: "pet")
 
         webView = WKWebView(
-            frame: NSRect(x: 0, y: 0, width: 148, height: 148),
+            frame: NSRect(x: 0, y: 0, width: 388, height: 148),
             configuration: configuration
         )
         webView.setValue(false, forKey: "drawsBackground")
         webView.autoresizingMask = [.width, .height]
 
         panel = PetPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 148, height: 148),
+            contentRect: NSRect(x: 0, y: 0, width: 388, height: 148),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -240,6 +253,22 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
         }
     }
 
+    func openNotification() {
+        guard let notification = lastCommand?.notification else { return }
+        var components = URLComponents()
+        components.scheme = "kiro"
+        components.host = "TalhaKhalil.kiro-pet"
+        components.path = "/open"
+        components.queryItems = [
+            URLQueryItem(name: "sessionId", value: notification.sessionId),
+            URLQueryItem(name: "title", value: notification.title),
+            URLQueryItem(name: "notificationId", value: notification.id)
+        ]
+        if let url = components.url {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private func handleDragEvent(_ event: NSEvent) {
         if event.type == .leftMouseUp {
             endDrag()
@@ -268,12 +297,16 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
     }
 
     private func resize(to size: CGFloat) {
-        guard abs(panel.frame.width - size) > 0.5 else { return }
+        let width = size + 240
+        guard
+            abs(panel.frame.width - width) > 0.5 ||
+            abs(panel.frame.height - size) > 0.5
+        else { return }
         let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
-        panel.setContentSize(NSSize(width: size, height: size))
+        panel.setContentSize(NSSize(width: width, height: size))
         panel.setFrameOrigin(
             NSPoint(
-                x: center.x - size / 2,
+                x: center.x - width / 2,
                 y: center.y - size / 2
             )
         )

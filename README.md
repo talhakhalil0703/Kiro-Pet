@@ -13,6 +13,10 @@ windows:
 Multiple chats are aggregated with this priority: waiting, failed, running,
 review, idle. A badge shows concurrent activity.
 
+Active chats show a status card with the Kiro session title. Waiting, failed,
+and completed alerts remain until clicked; clicking the card focuses Kiro and
+opens that exact chat session.
+
 ## How Codex Pet Works
 
 The installed Codex desktop app uses two layers:
@@ -44,8 +48,9 @@ Kiro 1.0.138 persists IDE sessions under:
 and `turn_end` markers, which lets the pet react during a first turn before the
 metadata file exists.
 
-For Remote SSH workspaces, the extension reads `session.json` through Kiro's
-existing `vscode-remote` filesystem connection. Locally, it also reads exact lifecycle marker text in the
+For Remote SSH workspaces, the extension reads session status and title from
+`session.json` through Kiro's existing `vscode-remote` filesystem connection.
+Locally, it also reads exact lifecycle marker text in the
 last 128 KiB of each transcript. It does not parse, retain, or transmit chat
 content. All communication stays on `127.0.0.1`.
 
@@ -63,7 +68,7 @@ npm install
 npm test
 npm run package
 /Applications/Kiro.app/Contents/Resources/app/bin/code \
-  --install-extension kiro-pet-0.1.1.vsix
+  --install-extension kiro-pet-0.1.2.vsix
 ```
 
 Reload Kiro after installation. Use the **Kiro Pet** commands from the Command

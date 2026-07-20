@@ -122,7 +122,7 @@ try {
   await delay(250);
   const resizedWindow = await waitForWindow();
   if (
-    resizedWindow.bounds.Width !== 220 ||
+    resizedWindow.bounds.Width !== 460 ||
     resizedWindow.bounds.Height !== 220
   ) {
     throw new Error(
@@ -189,6 +189,12 @@ try {
 }
 
 function makeState(state, overrides = {}) {
+  const statusByState = {
+    failed: "Chat failed",
+    review: "Ready to review",
+    running: "Kiro is working",
+    waiting: "Needs your input"
+  };
   return {
     ...state,
     clickThrough: false,
@@ -197,6 +203,18 @@ function makeState(state, overrides = {}) {
     size: 148,
     type: "state",
     version: 1,
+    ...(state.state === "idle"
+      ? {}
+      : {
+          notification: {
+            id: `smoke-${state.state}`,
+            persistent: state.state !== "running",
+            sessionId: "sess_smoke",
+            state: state.state,
+            statusText: statusByState[state.state],
+            title: "Example Kiro session with a deliberately long title"
+          }
+        }),
     ...overrides
   };
 }

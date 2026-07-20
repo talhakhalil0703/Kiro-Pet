@@ -7,6 +7,7 @@ import { SessionMonitor } from "./session-monitor";
 import type { OverlaySettings, PetSnapshot } from "./types";
 
 interface Monitor {
+  acknowledge?(notificationId: string): void;
   dispose(): void;
   start(): Promise<void>;
 }
@@ -33,6 +34,31 @@ export async function activate(
   );
   statusBar.command = "kiroPet.hide";
   context.subscriptions.push(statusBar);
+
+  context.subscriptions.push(
+    vscode.window.registerUriHandler({
+      handleUri: async (uri) => {
+        if (uri.path !== "/open") {
+          return;
+        }
+        const parameters = new URLSearchParams(uri.query);
+        const sessionId = parameters.get("sessionId");
+        const title = parameters.get("title") ?? undefined;
+        const notificationId = parameters.get("notificationId");
+        if (!sessionId) {
+          return;
+        }
+        await vscode.commands.executeCommand(
+          "kiroAgent.viewSession",
+          sessionId,
+          title
+        );
+        if (notificationId) {
+          monitor?.acknowledge?.(notificationId);
+        }
+      }
+    })
+  );
 
   let snapshot: PetSnapshot = {
     activeCount: 0,
@@ -187,8 +213,14 @@ function updateStatusBar(
     return;
   }
 
-  item.text = `${stateIcon(snapshot.state)} Kiro Pet`;
-  item.tooltip = `${stateLabel(snapshot)}. Click to ${
+  const visibleStatus =
+    snapshot.notification?.statusText ?? stateLabel(snapshot);
+  item.text = `${stateIcon(snapshot.state)} ${visibleStatus}`;
+  item.tooltip = `${
+    snapshot.notification
+      ? `${visibleStatus}: ${snapshot.notification.title}`
+      : visibleStatus
+  }. Click to ${
     enabled ? "hide" : "show"
   } the desktop pet.`;
   item.command = enabled ? "kiroPet.hide" : "kiroPet.show";
