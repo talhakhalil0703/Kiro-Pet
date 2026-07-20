@@ -11,10 +11,22 @@ const HELPER_STALE_MS = 6_000;
 const ENSURE_INTERVAL_MS = 2_000;
 
 interface OverlayMessage extends OverlaySettings, PetSnapshot {
+  callbackPort: number;
   htmlPath: string;
   label: string;
+  sourceId: string;
   type: "state";
-  version: 1;
+  version: 2;
+  workspaceUri?: string;
+}
+
+interface NotificationClickMessage {
+  notificationId: string;
+  sessionId: string;
+  sourceId: string;
+  title?: string;
+  type: "notification-click";
+  version: 2;
 }
 
 export class OverlayController {
@@ -23,6 +35,7 @@ export class OverlayController {
   private readonly htmlPath: string;
   private readonly heartbeatPath: string;
   private ensureTimer: NodeJS.Timeout | undefined;
+  private callbackPort: number | undefined;
   private disposed = false;
   private lastSpawnAt = 0;
   private snapshot: PetSnapshot = {
@@ -37,12 +50,19 @@ export class OverlayController {
     clickThrough: false,
     enabled: true,
     showActiveCount: true,
-    size: 148
+    size: 112
   };
 
   public constructor(
     context: ExtensionContext,
-    private readonly output: OutputChannel
+    private readonly output: OutputChannel,
+    private readonly sourceId: string,
+    private readonly workspaceUri: string | undefined,
+    private readonly onNotificationClick: (
+      notificationId: string,
+      sessionId: string,
+      title?: string
+    ) => Promise<void>
   ) {
     this.binaryPath = context.asAbsolutePath(
       path.join("bin", "kiro-pet-overlay")
@@ -53,10 +73,16 @@ export class OverlayController {
       os.tmpdir(),
       `kiro-pet-${uid}.heartbeat`
     );
-    this.socket.unref();
+    this.socket.on("message", (payload) => {
+      void this.handleMessage(payload);
+    });
+    this.socket.on("error", (error) => {
+      this.output.appendLine(`Overlay socket failed: ${error.message}`);
+    });
   }
 
   public async start(): Promise<void> {
+    await this.bindSocket();
     await this.ensureHelper();
     this.sendState();
     this.ensureTimer = setInterval(() => {
@@ -77,11 +103,11 @@ export class OverlayController {
   }
 
   public resetPosition(): void {
-    this.send({ type: "reset-position", version: 1 });
+    this.send({ type: "reset-position", version: 2 });
   }
 
   public async restart(): Promise<void> {
-    this.send({ type: "quit", version: 1 });
+    this.send({ type: "quit", version: 2 });
     await new Promise((resolve) => setTimeout(resolve, 500));
     await this.spawnHelper();
     this.sendState();
@@ -143,16 +169,80 @@ export class OverlayController {
   }
 
   private sendState(): void {
+    if (this.callbackPort === undefined) {
+      return;
+    }
     const label = stateLabel(this.snapshot);
     const message: OverlayMessage = {
       ...this.snapshot,
       ...this.settings,
+      callbackPort: this.callbackPort,
       htmlPath: this.htmlPath,
       label,
+      sourceId: this.sourceId,
       type: "state",
-      version: 1
+      version: 2,
+      workspaceUri: this.workspaceUri
     };
     this.send(message);
+  }
+
+  private bindSocket(): Promise<void> {
+    if (this.callbackPort !== undefined) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const onError = (error: Error): void => {
+        this.socket.off("listening", onListening);
+        reject(error);
+      };
+      const onListening = (): void => {
+        this.socket.off("error", onError);
+        const address = this.socket.address();
+        if (typeof address === "string") {
+          reject(new Error("Overlay callback socket did not bind to UDP."));
+          return;
+        }
+        this.callbackPort = address.port;
+        this.socket.unref();
+        resolve();
+      };
+      this.socket.once("error", onError);
+      this.socket.once("listening", onListening);
+      this.socket.bind(0, "127.0.0.1");
+    });
+  }
+
+  private async handleMessage(payload: Buffer): Promise<void> {
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(payload.toString("utf8")) as unknown;
+    } catch {
+      return;
+    }
+    if (typeof decoded !== "object" || decoded === null) {
+      return;
+    }
+    const message = decoded as NotificationClickMessage;
+    if (
+      message.type !== "notification-click" ||
+      message.version !== 2 ||
+      message.sourceId !== this.sourceId ||
+      typeof message.notificationId !== "string" ||
+      typeof message.sessionId !== "string"
+    ) {
+      return;
+    }
+    try {
+      await this.onNotificationClick(
+        message.notificationId,
+        message.sessionId,
+        typeof message.title === "string" ? message.title : undefined
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.output.appendLine(`Unable to open Kiro chat: ${detail}`);
+    }
   }
 
   private send(message: object): void {

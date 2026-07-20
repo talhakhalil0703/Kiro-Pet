@@ -5,6 +5,7 @@ import type {
   PetSnapshot,
   PetState
 } from "./types";
+import { matchesWorkspace } from "./workspace-paths";
 
 const MESSAGE_TAIL_BYTES = 128 * 1024;
 const ACTIVE_STALE_MS = 6 * 60 * 60 * 1000;
@@ -35,12 +36,14 @@ interface SessionRecord {
   seenAtScan: number;
   statusVersion: number;
   title: string;
+  workspacePaths: string[];
 }
 
 export interface SessionMonitorOptions {
   now?: () => number;
   pollIntervalMs?: number;
   reviewDurationMs?: number;
+  workspacePaths?: readonly string[];
 }
 
 export class SessionMonitor {
@@ -48,6 +51,7 @@ export class SessionMonitor {
   private readonly now: () => number;
   private readonly pollIntervalMs: number;
   private readonly reviewDurationMs: number;
+  private readonly workspacePaths: readonly string[];
   private interval: NodeJS.Timeout | undefined;
   private lastSnapshot: PetSnapshot | undefined;
   private scanCounter = 0;
@@ -62,6 +66,7 @@ export class SessionMonitor {
     this.now = options.now ?? Date.now;
     this.pollIntervalMs = options.pollIntervalMs ?? 1_000;
     this.reviewDurationMs = options.reviewDurationMs ?? 12_000;
+    this.workspacePaths = options.workspacePaths ?? [];
   }
 
   public async start(): Promise<void> {
@@ -177,7 +182,8 @@ export class SessionMonitor {
         reviewUntil: 0,
         seenAtScan: scanId,
         statusVersion: 0,
-        title: "Kiro chat"
+        title: "Kiro chat",
+        workspacePaths: []
       };
     record.seenAtScan = scanId;
 
@@ -211,6 +217,7 @@ export class SessionMonitor {
         id?: unknown;
         status?: unknown;
         title?: unknown;
+        workspacePaths?: unknown;
       };
       if (typeof metadata.id === "string") {
         record.id = metadata.id;
@@ -221,12 +228,21 @@ export class SessionMonitor {
       record.metadataStatus = isKiroStatus(metadata.status)
         ? metadata.status
         : undefined;
+      record.workspacePaths = readWorkspacePaths(metadata.workspacePaths);
       if (record.metadataStatus !== previousStatus) {
         record.statusVersion += 1;
       }
       record.metadataMtimeMs = stat.mtimeMs;
     } catch {
       return;
+    }
+
+    if (
+      record.metadataStatus === "in_progress" ||
+      record.metadataStatus === "waiting_on_user" ||
+      record.metadataStatus === "failed"
+    ) {
+      clearReview(record);
     }
 
     if (!record.initialized) {
@@ -245,8 +261,7 @@ export class SessionMonitor {
     if (
       record.metadataStatus === "completed" ||
       (previousStatus === "in_progress" &&
-        record.metadataStatus !== "waiting_on_user" &&
-        record.metadataStatus !== "failed")
+        record.metadataStatus === "idle")
     ) {
       record.reviewUntil = this.now() + this.reviewDurationMs;
       record.pendingReviewKey = `review:${stat.mtimeMs}`;
@@ -292,6 +307,9 @@ export class SessionMonitor {
     }
     record.messageSize = stat.size;
 
+    if (record.markerActive) {
+      clearReview(record);
+    }
     if (record.initialized && previousActive && !record.markerActive) {
       record.reviewUntil = this.now() + this.reviewDurationMs;
       record.pendingReviewKey = `review:${stat.mtimeMs}`;
@@ -300,7 +318,10 @@ export class SessionMonitor {
 
   private emitSnapshot(): void {
     const now = this.now();
-    const states = [...this.records.values()].map((record) =>
+    const records = [...this.records.values()].filter((record) =>
+      matchesWorkspace(record.workspacePaths, this.workspacePaths)
+    );
+    const states = records.map((record) =>
       this.effectiveState(record, now)
     );
     const snapshot: PetSnapshot = {
@@ -309,7 +330,7 @@ export class SessionMonitor {
       ).length,
       failedCount: states.filter((state) => state === "failed").length,
       notifications: selectNotifications(
-        [...this.records.values()],
+        records,
         (record) => this.effectiveState(record, now)
       ),
       reviewCount: states.filter((state) => state === "review").length,
@@ -365,8 +386,7 @@ function selectNotifications(
   const priority: Record<PetNotification["state"], number> = {
     waiting: 0,
     failed: 1,
-    review: 2,
-    running: 3
+    review: 2
   };
   return candidates.sort(
     (left, right) => priority[left.state] - priority[right.state]
@@ -382,19 +402,16 @@ function notificationFor(
       ? state
       : record.pendingReviewKey
         ? "review"
-        : state === "running"
-          ? "running"
-          : undefined;
+        : undefined;
   if (!notificationState) {
     return undefined;
   }
-  const persistent = notificationState !== "running";
-  if (persistent && record.acknowledgedKey === alertKey(record)) {
+  if (record.acknowledgedKey === alertKey(record)) {
     return undefined;
   }
   return {
     id: `${record.id}:${alertKey(record)}`,
-    persistent,
+    persistent: true,
     sessionId: record.id,
     state: notificationState,
     statusText: statusText(notificationState),
@@ -417,8 +434,6 @@ function statusText(state: PetNotification["state"]): string {
       return "Chat failed";
     case "review":
       return "Ready to review";
-    case "running":
-      return "Kiro is working";
   }
 }
 
@@ -452,4 +467,15 @@ function isNotFound(error: unknown): boolean {
     "code" in error &&
     (error as NodeJS.ErrnoException).code === "ENOENT"
   );
+}
+
+function readWorkspacePaths(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function clearReview(record: SessionRecord): void {
+  record.pendingReviewKey = undefined;
+  record.reviewUntil = 0;
 }

@@ -4,8 +4,10 @@ import type {
   PetSnapshot,
   PetState
 } from "./types";
+import { matchesWorkspace } from "./workspace-paths";
 
 const ACTIVE_STALE_MS = 6 * 60 * 60 * 1000;
+const COMPLETION_SETTLE_MS = 4_000;
 const FAILED_HOLD_MS = 60 * 60 * 1000;
 const WAITING_STALE_MS = 24 * 60 * 60 * 1000;
 
@@ -24,10 +26,13 @@ interface SessionRecord {
   metadataMtimeMs: number;
   metadataStatus?: KiroStatus;
   pendingReviewKey?: string;
+  reviewCandidateAt: number;
+  reviewCandidateKey?: string;
   reviewUntil: number;
   seenAtScan: number;
   statusVersion: number;
   title: string;
+  workspacePaths: string[];
 }
 
 export class RemoteSessionMonitor {
@@ -41,6 +46,7 @@ export class RemoteSessionMonitor {
     private readonly sessionsUri: vscode.Uri,
     private readonly onChange: (snapshot: PetSnapshot) => void,
     private readonly reviewDurationMs: number,
+    private readonly workspacePaths: readonly string[] = [],
     private readonly pollIntervalMs = 1_000
   ) {}
 
@@ -137,10 +143,12 @@ export class RemoteSessionMonitor {
         id: directory.path.split("/").at(-1) ?? key,
         initialized: false,
         metadataMtimeMs: 0,
+        reviewCandidateAt: 0,
         reviewUntil: 0,
         seenAtScan: scanId,
         statusVersion: 0,
-        title: "Kiro chat"
+        title: "Kiro chat",
+        workspacePaths: []
       };
     record.seenAtScan = scanId;
 
@@ -161,7 +169,12 @@ export class RemoteSessionMonitor {
         const data = await vscode.workspace.fs.readFile(metadataUri);
         const metadata = JSON.parse(
           new TextDecoder().decode(data)
-        ) as { id?: unknown; status?: unknown; title?: unknown };
+        ) as {
+          id?: unknown;
+          status?: unknown;
+          title?: unknown;
+          workspacePaths?: unknown;
+        };
         if (typeof metadata.id === "string") {
           record.id = metadata.id;
         }
@@ -171,6 +184,7 @@ export class RemoteSessionMonitor {
         record.metadataStatus = isKiroStatus(metadata.status)
           ? metadata.status
           : undefined;
+        record.workspacePaths = readWorkspacePaths(metadata.workspacePaths);
         if (record.metadataStatus !== previousStatus) {
           record.statusVersion += 1;
         }
@@ -180,18 +194,27 @@ export class RemoteSessionMonitor {
       }
 
       const now = Date.now();
+      if (
+        record.metadataStatus === "in_progress" ||
+        record.metadataStatus === "waiting_on_user" ||
+        record.metadataStatus === "failed"
+      ) {
+        clearReview(record);
+      }
       if (record.initialized) {
         if (record.metadataStatus === "failed") {
           record.failedUntil = now + FAILED_HOLD_MS;
         }
-        if (
-          record.metadataStatus === "completed" ||
-          (previousStatus === "in_progress" &&
-            record.metadataStatus !== "waiting_on_user" &&
-            record.metadataStatus !== "failed")
-        ) {
+        if (record.metadataStatus === "completed") {
           record.reviewUntil = now + this.reviewDurationMs;
           record.pendingReviewKey = `review:${fileStat.mtime}`;
+          clearReviewCandidate(record);
+        } else if (
+          previousStatus === "in_progress" &&
+          record.metadataStatus === "idle"
+        ) {
+          record.reviewCandidateAt = now;
+          record.reviewCandidateKey = `review:${fileStat.mtime}`;
         }
       } else if (
         record.metadataStatus === "failed" &&
@@ -212,7 +235,21 @@ export class RemoteSessionMonitor {
 
   private emitSnapshot(): void {
     const now = Date.now();
-    const states = [...this.records.values()].map((record) =>
+    for (const record of this.records.values()) {
+      if (
+        record.reviewCandidateKey &&
+        now - record.reviewCandidateAt >= COMPLETION_SETTLE_MS &&
+        record.metadataStatus === "idle"
+      ) {
+        record.reviewUntil = now + this.reviewDurationMs;
+        record.pendingReviewKey = record.reviewCandidateKey;
+        clearReviewCandidate(record);
+      }
+    }
+    const records = [...this.records.values()].filter((record) =>
+      matchesWorkspace(record.workspacePaths, this.workspacePaths)
+    );
+    const states = records.map((record) =>
       effectiveState(record, now, this.reviewDurationMs)
     );
     const snapshot: PetSnapshot = {
@@ -220,10 +257,7 @@ export class RemoteSessionMonitor {
         (state) => state === "running" || state === "waiting"
       ).length,
       failedCount: states.filter((state) => state === "failed").length,
-      notifications: selectNotifications(
-        [...this.records.values()],
-        now
-      ),
+      notifications: selectNotifications(records, now),
       reviewCount: states.filter((state) => state === "review").length,
       state: aggregateState(states),
       waitingCount: states.filter((state) => state === "waiting").length
@@ -245,8 +279,7 @@ function selectNotifications(
   const priority: Record<PetNotification["state"], number> = {
     waiting: 0,
     failed: 1,
-    review: 2,
-    running: 3
+    review: 2
   };
   return candidates.sort(
     (left, right) => priority[left.state] - priority[right.state]
@@ -264,21 +297,18 @@ function notificationFor(
       : record.pendingReviewKey
         ? "review"
         : undefined;
-  const notificationState =
-    persistentState ?? (state === "running" ? "running" : undefined);
-  if (!notificationState) {
+  if (!persistentState) {
     return undefined;
   }
-  const persistent = notificationState !== "running";
-  if (persistent && record.acknowledgedKey === alertKey(record)) {
+  if (record.acknowledgedKey === alertKey(record)) {
     return undefined;
   }
   return {
     id: `${record.id}:${alertKey(record)}`,
-    persistent,
+    persistent: true,
     sessionId: record.id,
-    state: notificationState,
-    statusText: statusText(notificationState),
+    state: persistentState,
+    statusText: statusText(persistentState),
     title: record.title
   };
 }
@@ -298,8 +328,6 @@ function statusText(state: PetNotification["state"]): string {
       return "Chat failed";
     case "review":
       return "Ready to review";
-    case "running":
-      return "Kiro is working";
   }
 }
 
@@ -363,4 +391,21 @@ function isNotFound(error: unknown): boolean {
     error instanceof vscode.FileSystemError &&
     error.code === "FileNotFound"
   );
+}
+
+function readWorkspacePaths(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function clearReview(record: SessionRecord): void {
+  record.pendingReviewKey = undefined;
+  record.reviewUntil = 0;
+  clearReviewCandidate(record);
+}
+
+function clearReviewCandidate(record: SessionRecord): void {
+  record.reviewCandidateAt = 0;
+  record.reviewCandidateKey = undefined;
 }

@@ -13,7 +13,7 @@
         --cyan: #19b7c9;
         --danger: #e05263;
         --ink: #17151c;
-        --pet-size: 148px;
+        --pet-size: 112px;
         --success: #36a269;
         --warning: #efa83a;
       }
@@ -74,6 +74,22 @@
         display: flex;
         flex-direction: column;
         gap: 8px;
+      }
+
+      #status-line {
+        position: absolute;
+        right: calc(var(--pet-size) - 4px);
+        bottom: 18px;
+        max-width: calc(100% - var(--pet-size) + 4px);
+        overflow: hidden;
+        color: rgba(247, 247, 250, 0.94);
+        font: 600 13px/18px -apple-system, BlinkMacSystemFont, sans-serif;
+        letter-spacing: 0;
+        text-align: right;
+        text-overflow: ellipsis;
+        text-shadow: 0 1px 5px rgba(0, 0, 0, 0.8);
+        white-space: nowrap;
+        pointer-events: none;
       }
 
       .notice {
@@ -392,6 +408,7 @@
   <body data-state="idle">
     <div id="stage" role="img" aria-label="Kiro Pet is idle">
       <div id="notices"></div>
+      <div id="status-line">Kiro Pet is idle</div>
       <div id="pet-shell">
         <svg
           id="pet"
@@ -435,6 +452,7 @@
       const petShell = document.getElementById("pet-shell");
       const count = document.getElementById("count");
       const notices = document.getElementById("notices");
+      const statusLine = document.getElementById("status-line");
 
       petShell.addEventListener("pointerdown", (event) => {
         if (event.button !== 0) return;
@@ -448,11 +466,12 @@
           const state = message.state || "idle";
           document.documentElement.style.setProperty(
             "--pet-size",
-            `${message.size || 148}px`
+            `${message.size || 112}px`
           );
           document.body.dataset.state = state;
           stage.setAttribute("aria-label", message.label || "Kiro Pet");
           stage.title = message.label || "Kiro Pet";
+          statusLine.textContent = message.label || "Kiro Pet";
 
           const total = Math.max(
             message.activeCount || 0,

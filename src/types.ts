@@ -8,11 +8,16 @@ export const PET_STATES = [
 
 export type PetState = (typeof PET_STATES)[number];
 
+export type PetNotificationState = Exclude<
+  PetState,
+  "idle" | "running"
+>;
+
 export interface PetNotification {
   id: string;
   persistent: boolean;
   sessionId: string;
-  state: Exclude<PetState, "idle">;
+  state: PetNotificationState;
   statusText: string;
   title: string;
 }

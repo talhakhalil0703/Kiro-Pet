@@ -2,7 +2,7 @@
   "name": "kiro-pet",
   "displayName": "Kiro Pet",
   "description": "An animated Kiro Ghosty that reflects local and Remote SSH chat activity above your desktop.",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "publisher": "TalhaKhalil",
   "license": "Unlicense",
   "repository": {
@@ -90,7 +90,7 @@
         },
         "kiroPet.size": {
           "type": "number",
-          "default": 148,
+          "default": 112,
           "minimum": 88,
           "maximum": 240,
           "scope": "application",

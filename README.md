@@ -13,9 +13,9 @@ windows:
 Multiple chats are aggregated with this priority: waiting, failed, running,
 review, idle. A badge shows concurrent activity.
 
-Active chats appear as a vertical stack of status cards above Ghosty. Waiting,
-failed, and completed alerts remain until their individual card is clicked;
-clicking a card focuses Kiro and opens that exact chat session.
+Running activity appears as a single status line beside Ghosty. Waiting, failed,
+and completed alerts form a vertical stack above it until each card is clicked.
+Every card is routed back to the Kiro window and chat session that created it.
 
 ## How Codex Pet Works
 
@@ -68,7 +68,7 @@ npm install
 npm test
 npm run package
 /Applications/Kiro.app/Contents/Resources/app/bin/code \
-  --install-extension kiro-pet-0.1.3.vsix
+  --install-extension kiro-pet-0.1.5.vsix
 ```
 
 Reload Kiro after installation. Use the **Kiro Pet** commands from the Command
@@ -77,8 +77,10 @@ pet directly when click-through is disabled.
 
 ## Design Notes
 
-- The helper is a singleton per macOS user. Multiple Kiro windows send the same
-  aggregate state to a fixed loopback UDP port.
+- The helper is a singleton per macOS user. Each Kiro window publishes only
+  sessions owned by its workspace, and the helper merges those sources.
+- Card clicks return over a per-window loopback callback before Kiro focuses the
+  matching workspace, avoiding ambiguous global URI dispatch.
 - The helper exits after 12 seconds without a Kiro extension heartbeat.
 - Running states older than six hours are treated as stale after a crash.
 - Failed states remain visible for up to one hour; waiting states for one day.

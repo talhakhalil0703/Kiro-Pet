@@ -18,6 +18,9 @@ private struct OverlayCommand: Codable {
     let htmlPath: String?
     let label: String?
     let notifications: [OverlayNotification]?
+    let callbackPort: Int?
+    let sourceId: String?
+    let workspaceUri: String?
 }
 
 private struct OverlayNotification: Codable {
@@ -26,6 +29,18 @@ private struct OverlayNotification: Codable {
     let sessionId: String
     let state: String
     let statusText: String
+    let title: String
+    let callbackPort: Int?
+    let sourceId: String?
+    let workspaceUri: String?
+}
+
+private struct NotificationClick: Codable {
+    let type: String
+    let version: Int
+    let notificationId: String
+    let sessionId: String
+    let sourceId: String
     let title: String
 }
 
@@ -37,7 +52,7 @@ private final class PetPanel: NSPanel {
 private final class UDPListener {
     private let fileDescriptor: Int32
     private let source: DispatchSourceRead
-    var onMessage: ((Data) -> Void)?
+    var onMessage: ((Data, UInt16) -> Void)?
 
     init?(port: UInt16) {
         let descriptor = Darwin.socket(AF_INET, SOCK_DGRAM, 0)
@@ -79,20 +94,52 @@ private final class UDPListener {
         Darwin.close(fileDescriptor)
     }
 
+    func send(_ data: Data, to port: UInt16) {
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+
+        data.withUnsafeBytes { bytes in
+            withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    _ = Darwin.sendto(
+                        fileDescriptor,
+                        bytes.baseAddress,
+                        bytes.count,
+                        0,
+                        $0,
+                        socklen_t(MemoryLayout<sockaddr_in>.size)
+                    )
+                }
+            }
+        }
+    }
+
     private func receive() {
         var buffer = [UInt8](repeating: 0, count: 65_535)
-        let count = buffer.withUnsafeMutableBytes {
-            Darwin.recvfrom(
-                fileDescriptor,
-                $0.baseAddress,
-                $0.count,
-                0,
-                nil,
-                nil
-            )
+        var sender = sockaddr_in()
+        var senderLength = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let count = buffer.withUnsafeMutableBytes { bytes in
+            withUnsafeMutablePointer(to: &sender) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Darwin.recvfrom(
+                        fileDescriptor,
+                        bytes.baseAddress,
+                        bytes.count,
+                        0,
+                        $0,
+                        &senderLength
+                    )
+                }
+            }
         }
         guard count > 0 else { return }
-        onMessage?(Data(buffer.prefix(Int(count))))
+        onMessage?(
+            Data(buffer.prefix(Int(count))),
+            UInt16(bigEndian: sender.sin_port)
+        )
     }
 }
 
@@ -134,6 +181,7 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
     private var dragStartOrigin = NSPoint.zero
     private var localDragMonitor: Any?
     private var globalDragMonitor: Any?
+    var onNotificationClick: ((OverlayNotification) -> Void)?
 
     init(htmlPath: String) {
         let configuration = WKWebViewConfiguration()
@@ -141,14 +189,14 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
         configuration.userContentController.add(bridge, name: "pet")
 
         webView = WKWebView(
-            frame: NSRect(x: 0, y: 0, width: 340, height: 148),
+            frame: NSRect(x: 0, y: 0, width: 340, height: 112),
             configuration: configuration
         )
         webView.setValue(false, forKey: "drawsBackground")
         webView.autoresizingMask = [.width, .height]
 
         panel = PetPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 340, height: 148),
+            contentRect: NSRect(x: 0, y: 0, width: 340, height: 112),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -265,6 +313,10 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
                 where: { $0.id == id }
             )
         else { return }
+        onNotificationClick?(notification)
+    }
+
+    func openLegacyNotification(_ notification: OverlayNotification) {
         var components = URLComponents()
         components.scheme = "kiro"
         components.host = "TalhaKhalil.kiro-pet"
@@ -367,7 +419,13 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
     }
 }
 
+private struct TimedSource {
+    let command: OverlayCommand
+    let receivedAt: Date
+}
+
 private final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let sourceStaleSeconds: TimeInterval = 6
     private let htmlPath: String
     private let heartbeatPath: String
     private let port: UInt16
@@ -375,6 +433,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: PetWindowController?
     private var heartbeatTimer: Timer?
     private var lastMessageAt = Date()
+    private var sources: [String: TimedSource] = [:]
+    private var hasSeenVersionTwo = false
 
     init(htmlPath: String, heartbeatPath: String, port: UInt16) {
         self.htmlPath = htmlPath
@@ -388,10 +448,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         self.listener = listener
-        windowController = PetWindowController(htmlPath: htmlPath)
-        listener.onMessage = { [weak self] data in
+        let controller = PetWindowController(htmlPath: htmlPath)
+        controller.onNotificationClick = { [weak self] notification in
+            self?.open(notification)
+        }
+        windowController = controller
+        listener.onMessage = { [weak self] data, senderPort in
             DispatchQueue.main.async {
-                self?.handle(data)
+                self?.handle(data, senderPort: senderPort)
             }
         }
 
@@ -409,15 +473,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         try? FileManager.default.removeItem(atPath: heartbeatPath)
     }
 
-    private func handle(_ data: Data) {
+    private func handle(_ data: Data, senderPort: UInt16) {
         guard let command = try? JSONDecoder().decode(OverlayCommand.self, from: data) else {
             return
         }
-        lastMessageAt = Date()
         switch command.type {
         case "state":
-            windowController?.apply(command)
+            if updateSource(command, senderPort: senderPort) {
+                lastMessageAt = Date()
+            }
         case "reset-position":
+            lastMessageAt = Date()
             windowController?.resetPosition()
         case "quit":
             NSApp.terminate(nil)
@@ -426,8 +492,103 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func updateSource(
+        _ command: OverlayCommand,
+        senderPort: UInt16
+    ) -> Bool {
+        if
+            command.version >= 2,
+            let sourceId = command.sourceId,
+            !sourceId.isEmpty,
+            command.callbackPort != nil
+        {
+            if !hasSeenVersionTwo {
+                hasSeenVersionTwo = true
+                sources = sources.filter { !$0.key.hasPrefix("legacy:") }
+            }
+            sources[sourceId] = TimedSource(
+                command: command,
+                receivedAt: Date()
+            )
+        } else if !hasSeenVersionTwo {
+            sources["legacy:\(senderPort)"] = TimedSource(
+                command: command,
+                receivedAt: Date()
+            )
+        } else {
+            return false
+        }
+        applyCombinedState()
+        return true
+    }
+
+    private func applyCombinedState() {
+        guard let combined = combineSources(Array(sources.values)) else {
+            return
+        }
+        windowController?.apply(combined)
+    }
+
+    private func open(_ notification: OverlayNotification) {
+        if
+            let portValue = notification.callbackPort,
+            let callbackPort = UInt16(exactly: portValue),
+            callbackPort > 0,
+            let sourceId = notification.sourceId,
+            let data = try? JSONEncoder().encode(
+                NotificationClick(
+                    type: "notification-click",
+                    version: 2,
+                    notificationId: notification.id,
+                    sessionId: notification.sessionId,
+                    sourceId: sourceId,
+                    title: notification.title
+                )
+            )
+        {
+            listener?.send(data, to: callbackPort)
+            focusWorkspace(notification.workspaceUri)
+        } else {
+            windowController?.openLegacyNotification(notification)
+        }
+    }
+
+    private func focusWorkspace(_ workspaceUri: String?) {
+        guard
+            let workspaceUri,
+            let source = URLComponents(string: workspaceUri)
+        else { return }
+
+        var target = URLComponents()
+        target.scheme = "kiro"
+        if source.scheme == "file" {
+            target.host = "file"
+            target.path = source.path
+        } else if
+            source.scheme == "vscode-remote",
+            let authority = source.host
+        {
+            target.host = "vscode-remote"
+            target.path = "/\(authority)\(source.path)"
+        } else {
+            return
+        }
+        guard let url = target.url else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     private func tick() {
         writeHeartbeat()
+        let staleBefore = Date().addingTimeInterval(
+            -Self.sourceStaleSeconds
+        )
+        let sourceCount = sources.count
+        sources = sources.filter { $0.value.receivedAt >= staleBefore }
+        if sources.count != sourceCount {
+            applyCombinedState()
+        }
         if Date().timeIntervalSince(lastMessageAt) > 12 {
             NSApp.terminate(nil)
         }
@@ -440,6 +601,129 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             atomically: true,
             encoding: .utf8
         )
+    }
+}
+
+private func combineSources(_ sources: [TimedSource]) -> OverlayCommand? {
+    guard
+        let latest = sources.max(
+            by: { $0.receivedAt < $1.receivedAt }
+        )
+    else { return nil }
+
+    let commands = sources.map(\.command)
+    let state = commands
+        .compactMap(\.state)
+        .min(by: { statePriority($0) < statePriority($1) }) ?? "idle"
+    let activeCount = aggregateCount(commands, \.activeCount)
+    let failedCount = aggregateCount(commands, \.failedCount)
+    let reviewCount = aggregateCount(commands, \.reviewCount)
+    let waitingCount = aggregateCount(commands, \.waitingCount)
+
+    var notificationsById: [String: OverlayNotification] = [:]
+    for source in sources.sorted(by: { $0.receivedAt < $1.receivedAt }) {
+        for notification in source.command.notifications ?? []
+            where notification.state != "running"
+        {
+            notificationsById[notification.id] = OverlayNotification(
+                id: notification.id,
+                persistent: notification.persistent,
+                sessionId: notification.sessionId,
+                state: notification.state,
+                statusText: notification.statusText,
+                title: notification.title,
+                callbackPort: source.command.callbackPort,
+                sourceId: source.command.sourceId,
+                workspaceUri: source.command.workspaceUri
+            )
+        }
+    }
+    let notifications = notificationsById.values.sorted {
+        let left = statePriority($0.state)
+        let right = statePriority($1.state)
+        if left != right {
+            return left < right
+        }
+        return $0.title.localizedCaseInsensitiveCompare($1.title)
+            == .orderedAscending
+    }
+
+    let latestCommand = latest.command
+    return OverlayCommand(
+        type: "state",
+        version: 2,
+        state: state,
+        activeCount: activeCount,
+        failedCount: failedCount,
+        reviewCount: reviewCount,
+        waitingCount: waitingCount,
+        clickThrough: latestCommand.clickThrough,
+        enabled: latestCommand.enabled,
+        showActiveCount: latestCommand.showActiveCount,
+        size: latestCommand.size,
+        htmlPath: latestCommand.htmlPath,
+        label: combinedLabel(
+            state: state,
+            activeCount: activeCount,
+            failedCount: failedCount,
+            waitingCount: waitingCount
+        ),
+        notifications: notifications,
+        callbackPort: nil,
+        sourceId: nil,
+        workspaceUri: nil
+    )
+}
+
+private func aggregateCount(
+    _ commands: [OverlayCommand],
+    _ keyPath: KeyPath<OverlayCommand, Int?>
+) -> Int {
+    let counts = commands.map { $0[keyPath: keyPath] ?? 0 }
+    if commands.allSatisfy({ $0.version >= 2 }) {
+        return counts.reduce(0, +)
+    }
+    return counts.max() ?? 0
+}
+
+private func statePriority(_ state: String) -> Int {
+    switch state {
+    case "waiting":
+        return 0
+    case "failed":
+        return 1
+    case "running":
+        return 2
+    case "review":
+        return 3
+    default:
+        return 4
+    }
+}
+
+private func combinedLabel(
+    state: String,
+    activeCount: Int,
+    failedCount: Int,
+    waitingCount: Int
+) -> String {
+    switch state {
+    case "running":
+        return activeCount > 1
+            ? "\(activeCount) chats working"
+            : "Kiro is working"
+    case "waiting":
+        return waitingCount > 1
+            ? "\(waitingCount) chats need you"
+            : "Kiro needs you"
+    case "review":
+        return "Ready to review"
+    case "failed":
+        return failedCount > 1
+            ? "\(failedCount) chats hit errors"
+            : "A chat hit an error"
+    default:
+        return "Kiro Pet is idle"
     }
 }
 

@@ -27,7 +27,31 @@ export async function activate(
     );
   }
 
-  overlay = new OverlayController(context, output);
+  const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+  const workspaceUris = workspaceFolders
+    .map((folder) => folder.uri.toString(true))
+    .sort();
+  const sourceId =
+    workspaceUris.length > 0
+      ? `workspace:${workspaceUris.join("|")}`
+      : `window:${process.pid}`;
+  const workspaceUri =
+    workspaceFolders[0]?.uri.toString(true) ??
+    vscode.workspace.workspaceFile?.toString(true);
+  overlay = new OverlayController(
+    context,
+    output,
+    sourceId,
+    workspaceUri,
+    async (notificationId, sessionId, title) => {
+      await vscode.commands.executeCommand(
+        "kiroAgent.viewSession",
+        sessionId,
+        title
+      );
+      monitor?.acknowledge?.(notificationId);
+    }
+  );
   const statusBar = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
     90
@@ -75,7 +99,7 @@ export async function activate(
       clickThrough: configuration.get("clickThrough", false),
       enabled: configuration.get("enabled", true),
       showActiveCount: configuration.get("showActiveCount", true),
-      size: configuration.get("size", 148)
+      size: configuration.get("size", 112)
     };
     overlay?.updateSettings(settings);
     updateStatusBar(
@@ -120,7 +144,14 @@ export async function activate(
       monitor = new RemoteSessionMonitor(
         sessionsUri,
         onChange,
-        reviewDurationMs
+        reviewDurationMs,
+        workspaceFolders
+          .filter(
+            (folder) =>
+              folder.uri.scheme === remoteFolder.uri.scheme &&
+              folder.uri.authority === remoteFolder.uri.authority
+          )
+          .map((folder) => folder.uri.path)
       );
       await monitor.start();
       output.appendLine(
@@ -134,7 +165,12 @@ export async function activate(
     monitor = new SessionMonitor(
       sessionsPath,
       onChange,
-      { reviewDurationMs }
+      {
+        reviewDurationMs,
+        workspacePaths: workspaceFolders
+          .filter((folder) => folder.uri.scheme === "file")
+          .map((folder) => folder.uri.fsPath)
+      }
     );
     await monitor.start();
     output.appendLine(`Watching local Kiro lifecycle data in ${sessionsPath}`);

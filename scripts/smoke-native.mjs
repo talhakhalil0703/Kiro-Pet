@@ -78,15 +78,15 @@ const helperExit = new Promise((resolve) => {
 });
 
 const socket = createSocket("udp4");
-let currentMessage = makeState(states[0]);
+let currentMessages = [makeState(states[0])];
 let keepAliveError;
 let keepAliveTimer;
 
 try {
   await delay(250);
-  await send(currentMessage);
+  await sendAll(currentMessages);
   keepAliveTimer = setInterval(() => {
-    void send(currentMessage).catch((error) => {
+    void sendAll(currentMessages).catch((error) => {
       keepAliveError = error;
     });
   }, 1_000);
@@ -94,8 +94,8 @@ try {
   await waitForWindow();
   const captures = [];
   for (const state of states) {
-    currentMessage = makeState(state);
-    await send(currentMessage);
+    currentMessages = [makeState(state)];
+    await sendAll(currentMessages);
     await delay(350);
 
     const window = await waitForWindow();
@@ -108,7 +108,7 @@ try {
       outputPath
     ]);
     const image = await inspectPng(outputPath);
-    if (image.width < 148 || image.height < 148 || !image.hasAlpha) {
+    if (image.width < 112 || image.height < 112 || !image.hasAlpha) {
       throw new Error(
         `Invalid ${state.state} capture: ${image.width}x${image.height}, ` +
           `alpha=${image.hasAlpha}`
@@ -117,34 +117,70 @@ try {
     captures.push(`${state.state}:${image.width}x${image.height}`);
   }
 
-  currentMessage = makeState(states[1], { size: 220 });
-  await send(currentMessage);
+  currentMessages = [
+    makeState(states[2]),
+    makeState(states[3], { sourceId: "workspace:review" })
+  ];
+  await sendAll(currentMessages);
+  await delay(250);
+  const combinedWindow = await waitForWindow();
+  if (
+    combinedWindow.bounds.Height !== 364 ||
+    combinedWindow.title !== "2 chats need you"
+  ) {
+    throw new Error(
+      `Source aggregation failed: ${JSON.stringify(combinedWindow)}`
+    );
+  }
+
+  currentMessages = [
+    makeState(states[1], { size: 220 }),
+    makeState(states[0], {
+      size: 220,
+      sourceId: "workspace:review"
+    })
+  ];
+  await sendAll(currentMessages);
   await delay(250);
   const resizedWindow = await waitForWindow();
   if (
     resizedWindow.bounds.Width !== 340 ||
-    resizedWindow.bounds.Height !== 304
+    resizedWindow.bounds.Height !== 220
   ) {
     throw new Error(
       `Resize failed: ${JSON.stringify(resizedWindow.bounds)}`
     );
   }
 
-  currentMessage = makeState(states[0], { enabled: false });
-  await send(currentMessage);
+  currentMessages = [
+    makeState(states[0], { enabled: false }),
+    makeState(states[0], {
+      enabled: false,
+      sourceId: "workspace:review"
+    })
+  ];
+  await sendAll(currentMessages);
   await delay(250);
   if (await findWindow()) {
     throw new Error("Hide failed: overlay is still on screen");
   }
 
-  currentMessage = makeState(states[0], {
-    clickThrough: true,
-    enabled: true,
-    size: 148
-  });
-  await send(currentMessage);
+  currentMessages = [
+    makeState(states[0], {
+      clickThrough: true,
+      enabled: true,
+      size: 112
+    }),
+    makeState(states[0], {
+      clickThrough: true,
+      enabled: true,
+      size: 112,
+      sourceId: "workspace:review"
+    })
+  ];
+  await sendAll(currentMessages);
   await waitForWindow();
-  await send({ type: "reset-position", version: 1 });
+  await send({ type: "reset-position", version: 2 });
   await delay(150);
 
   if (keepAliveError) {
@@ -153,7 +189,7 @@ try {
 
   clearInterval(keepAliveTimer);
   keepAliveTimer = undefined;
-  await send({ type: "quit", version: 1 });
+  await send({ type: "quit", version: 2 });
   const result = await Promise.race([
     helperExit,
     delay(5_000).then(() => {
@@ -230,11 +266,14 @@ function makeState(state, overrides = {}) {
   return {
     ...state,
     clickThrough: false,
+    callbackPort: 47_855,
     enabled: true,
     showActiveCount: true,
-    size: 148,
+    size: 112,
+    sourceId: "workspace:smoke",
     type: "state",
-    version: 1,
+    version: 2,
+    workspaceUri: "file:///tmp/kiro-pet-smoke",
     notifications,
     ...overrides
   };
@@ -255,6 +294,10 @@ function send(message) {
       }
     );
   });
+}
+
+function sendAll(messages) {
+  return Promise.all(messages.map((message) => send(message)));
 }
 
 async function waitForWindow() {
@@ -285,7 +328,8 @@ for row in rows {
     guard ownerPID == targetPID else { continue }
     let result: [String: Any] = [
         "id": row[kCGWindowNumber as String] as? Int ?? -1,
-        "bounds": row[kCGWindowBounds as String] as? [String: Any] ?? [:]
+        "bounds": row[kCGWindowBounds as String] as? [String: Any] ?? [:],
+        "title": row[kCGWindowName as String] as? String ?? ""
     ]
     let data = try! JSONSerialization.data(withJSONObject: result)
     print(String(data: data, encoding: .utf8)!)
