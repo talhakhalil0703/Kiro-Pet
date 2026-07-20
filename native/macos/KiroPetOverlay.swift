@@ -17,7 +17,7 @@ private struct OverlayCommand: Codable {
     let size: Double?
     let htmlPath: String?
     let label: String?
-    let notification: OverlayNotification?
+    let notifications: [OverlayNotification]?
 }
 
 private struct OverlayNotification: Codable {
@@ -98,7 +98,7 @@ private final class UDPListener {
 
 private protocol PetBridgeDelegate: AnyObject {
     func beginDrag()
-    func openNotification()
+    func openNotification(id: String)
 }
 
 private final class PetBridge: NSObject, WKScriptMessageHandler {
@@ -115,8 +115,11 @@ private final class PetBridge: NSObject, WKScriptMessageHandler {
         }
         if type == "dragStart" {
             delegate?.beginDrag()
-        } else if type == "notificationClick" {
-            delegate?.openNotification()
+        } else if
+            type == "notificationClick",
+            let id = payload["id"] as? String
+        {
+            delegate?.openNotification(id: id)
         }
     }
 }
@@ -138,14 +141,14 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
         configuration.userContentController.add(bridge, name: "pet")
 
         webView = WKWebView(
-            frame: NSRect(x: 0, y: 0, width: 388, height: 148),
+            frame: NSRect(x: 0, y: 0, width: 340, height: 148),
             configuration: configuration
         )
         webView.setValue(false, forKey: "drawsBackground")
         webView.autoresizingMask = [.width, .height]
 
         panel = PetPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 388, height: 148),
+            contentRect: NSRect(x: 0, y: 0, width: 340, height: 148),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -205,7 +208,10 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
         lastCommand = command
 
         if let size = command.size {
-            resize(to: CGFloat(min(max(size, 88), 240)))
+            resize(
+                to: CGFloat(min(max(size, 88), 240)),
+                notificationCount: command.notifications?.count ?? 0
+            )
         }
         if let clickThrough = command.clickThrough {
             panel.ignoresMouseEvents = clickThrough
@@ -253,8 +259,12 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
         }
     }
 
-    func openNotification() {
-        guard let notification = lastCommand?.notification else { return }
+    func openNotification(id: String) {
+        guard
+            let notification = lastCommand?.notifications?.first(
+                where: { $0.id == id }
+            )
+        else { return }
         var components = URLComponents()
         components.scheme = "kiro"
         components.host = "TalhaKhalil.kiro-pet"
@@ -296,18 +306,20 @@ private final class PetWindowController: NSObject, WKNavigationDelegate, PetBrid
         savePosition()
     }
 
-    private func resize(to size: CGFloat) {
-        let width = size + 240
+    private func resize(to size: CGFloat, notificationCount: Int) {
+        let width = max(340, size)
+        let height = size + CGFloat(notificationCount * 84)
         guard
             abs(panel.frame.width - width) > 0.5 ||
-            abs(panel.frame.height - size) > 0.5
+            abs(panel.frame.height - height) > 0.5
         else { return }
-        let center = NSPoint(x: panel.frame.midX, y: panel.frame.midY)
-        panel.setContentSize(NSSize(width: width, height: size))
+        let anchoredMaxX = panel.frame.maxX
+        let anchoredMinY = panel.frame.minY
+        panel.setContentSize(NSSize(width: width, height: height))
         panel.setFrameOrigin(
             NSPoint(
-                x: center.x - width / 2,
-                y: center.y - size / 2
+                x: anchoredMaxX - width,
+                y: anchoredMinY
             )
         )
         keepOnScreen()

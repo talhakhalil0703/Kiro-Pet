@@ -63,6 +63,7 @@ export async function activate(
   let snapshot: PetSnapshot = {
     activeCount: 0,
     failedCount: 0,
+    notifications: [],
     reviewCount: 0,
     state: "idle",
     waitingCount: 0
@@ -213,12 +214,13 @@ function updateStatusBar(
     return;
   }
 
+  const visibleNotification = snapshot.notifications[0];
   const visibleStatus =
-    snapshot.notification?.statusText ?? stateLabel(snapshot);
+    visibleNotification?.statusText ?? stateLabel(snapshot);
   item.text = `${stateIcon(snapshot.state)} ${visibleStatus}`;
   item.tooltip = `${
-    snapshot.notification
-      ? `${visibleStatus}: ${snapshot.notification.title}`
+    visibleNotification
+      ? `${visibleStatus}: ${visibleNotification.title}`
       : visibleStatus
   }. Click to ${
     enabled ? "hide" : "show"

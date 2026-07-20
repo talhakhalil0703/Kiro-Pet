@@ -152,16 +152,16 @@ test("keeps an alert until it is acknowledged", async (t) => {
   await writeMetadata(fixture, "waiting_on_user");
   await fixture.monitor.scan();
 
-  const notification = fixture.snapshots.at(-1)?.notification;
+  const notification = fixture.snapshots.at(-1)?.notifications[0];
   assert.equal(notification?.statusText, "Needs your input");
   assert.equal(notification?.title, "Test session");
 
   fixture.monitor.acknowledge(notification!.id);
-  assert.equal(fixture.snapshots.at(-1)?.notification, undefined);
+  assert.deepEqual(fixture.snapshots.at(-1)?.notifications, []);
   assert.equal(fixture.snapshots.at(-1)?.state, "waiting");
 
   fixture.now.value += 1_000;
   await writeMetadata(fixture, "waiting_on_user");
   await fixture.monitor.scan();
-  assert.equal(fixture.snapshots.at(-1)?.notification, undefined);
+  assert.deepEqual(fixture.snapshots.at(-1)?.notifications, []);
 });

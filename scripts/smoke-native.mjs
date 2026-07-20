@@ -122,8 +122,8 @@ try {
   await delay(250);
   const resizedWindow = await waitForWindow();
   if (
-    resizedWindow.bounds.Width !== 460 ||
-    resizedWindow.bounds.Height !== 220
+    resizedWindow.bounds.Width !== 340 ||
+    resizedWindow.bounds.Height !== 304
   ) {
     throw new Error(
       `Resize failed: ${JSON.stringify(resizedWindow.bounds)}`
@@ -195,6 +195,38 @@ function makeState(state, overrides = {}) {
     running: "Kiro is working",
     waiting: "Needs your input"
   };
+  const primaryNotification = {
+    id: `smoke-${state.state}`,
+    persistent: state.state !== "running",
+    sessionId: "sess_smoke",
+    state: state.state,
+    statusText: statusByState[state.state],
+    title: "Example Kiro session with a deliberately long title"
+  };
+  const notifications =
+    state.state === "idle"
+      ? []
+      : state.state === "waiting"
+        ? [
+            primaryNotification,
+            {
+              ...primaryNotification,
+              id: "smoke-review",
+              sessionId: "sess_review",
+              state: "review",
+              statusText: "Ready to review",
+              title: "Review the completed refactor"
+            },
+            {
+              ...primaryNotification,
+              id: "smoke-failed",
+              sessionId: "sess_failed",
+              state: "failed",
+              statusText: "Chat failed",
+              title: "Fix the native helper build"
+            }
+          ]
+        : [primaryNotification];
   return {
     ...state,
     clickThrough: false,
@@ -203,18 +235,7 @@ function makeState(state, overrides = {}) {
     size: 148,
     type: "state",
     version: 1,
-    ...(state.state === "idle"
-      ? {}
-      : {
-          notification: {
-            id: `smoke-${state.state}`,
-            persistent: state.state !== "running",
-            sessionId: "sess_smoke",
-            state: state.state,
-            statusText: statusByState[state.state],
-            title: "Example Kiro session with a deliberately long title"
-          }
-        }),
+    notifications,
     ...overrides
   };
 }

@@ -308,7 +308,7 @@ export class SessionMonitor {
         (state) => state === "running" || state === "waiting"
       ).length,
       failedCount: states.filter((state) => state === "failed").length,
-      notification: selectNotification(
+      notifications: selectNotifications(
         [...this.records.values()],
         (record) => this.effectiveState(record, now)
       ),
@@ -355,10 +355,10 @@ export class SessionMonitor {
   }
 }
 
-function selectNotification(
+function selectNotifications(
   records: SessionRecord[],
   stateFor: (record: SessionRecord) => PetState
-): PetNotification | undefined {
+): PetNotification[] {
   const candidates = records
     .map((record) => notificationFor(record, stateFor(record)))
     .filter((value): value is PetNotification => value !== undefined);
@@ -370,7 +370,7 @@ function selectNotification(
   };
   return candidates.sort(
     (left, right) => priority[left.state] - priority[right.state]
-  )[0];
+  );
 }
 
 function notificationFor(

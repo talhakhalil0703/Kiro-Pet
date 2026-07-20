@@ -46,11 +46,10 @@
 
       #pet-shell {
         position: absolute;
-        top: 50%;
         right: 0;
+        bottom: 0;
         width: var(--pet-size);
         height: var(--pet-size);
-        transform: translateY(-50%);
         cursor: grab;
       }
 
@@ -67,14 +66,21 @@
         animation: idle-float 3.2s ease-in-out infinite;
       }
 
-      #notice {
+      #notices {
         position: absolute;
-        top: 50%;
+        top: 0;
         left: 8px;
-        width: 220px;
+        right: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .notice {
+        position: relative;
+        width: 100%;
         min-height: 76px;
         padding: 12px 14px 12px 17px;
-        transform: translateY(-50%);
         border: 1px solid rgba(255, 255, 255, 0.18);
         border-left: 4px solid var(--accent);
         border-radius: 8px;
@@ -87,46 +93,27 @@
         cursor: pointer;
       }
 
-      #notice[hidden] {
-        display: none;
-      }
-
-      #notice::after {
-        position: absolute;
-        top: calc(50% - 9px);
-        right: -10px;
-        width: 18px;
-        height: 18px;
-        transform: rotate(45deg);
-        border-top: 1px solid rgba(255, 255, 255, 0.18);
-        border-right: 1px solid rgba(255, 255, 255, 0.18);
-        background: rgba(30, 29, 34, 0.94);
-        content: "";
-      }
-
-      #notice[data-state="waiting"] {
+      .notice[data-state="waiting"] {
         border-left-color: var(--warning);
       }
 
-      #notice[data-state="review"] {
+      .notice[data-state="review"] {
         border-left-color: var(--success);
       }
 
-      #notice[data-state="failed"] {
+      .notice[data-state="failed"] {
         border-left-color: var(--danger);
       }
 
-      #notice-status,
-      #notice-title {
-        position: relative;
-        z-index: 1;
+      .notice-status,
+      .notice-title {
         display: block;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      #notice-status {
+      .notice-status {
         margin-bottom: 5px;
         color: #fff;
         font-size: 14px;
@@ -134,7 +121,7 @@
         line-height: 18px;
       }
 
-      #notice-title {
+      .notice-title {
         color: #c9c8d0;
         font-size: 12px;
         line-height: 16px;
@@ -404,10 +391,7 @@
   </head>
   <body data-state="idle">
     <div id="stage" role="img" aria-label="Kiro Pet is idle">
-      <button id="notice" type="button" hidden>
-        <span id="notice-status"></span>
-        <span id="notice-title"></span>
-      </button>
+      <div id="notices"></div>
       <div id="pet-shell">
         <svg
           id="pet"
@@ -450,20 +434,12 @@
       const stage = document.getElementById("stage");
       const petShell = document.getElementById("pet-shell");
       const count = document.getElementById("count");
-      const notice = document.getElementById("notice");
-      const noticeStatus = document.getElementById("notice-status");
-      const noticeTitle = document.getElementById("notice-title");
+      const notices = document.getElementById("notices");
 
       petShell.addEventListener("pointerdown", (event) => {
         if (event.button !== 0) return;
         window.webkit?.messageHandlers?.pet?.postMessage({
           type: "dragStart"
-        });
-      });
-
-      notice.addEventListener("click", () => {
-        window.webkit?.messageHandlers?.pet?.postMessage({
-          type: "notificationClick"
         });
       });
 
@@ -487,14 +463,30 @@
           count.textContent = total > 99 ? "99+" : String(total);
           count.style.display = showCount ? "grid" : "none";
 
-          const notification = message.notification;
-          notice.hidden = !notification;
-          if (notification) {
-            notice.dataset.state = notification.state;
-            noticeStatus.textContent = notification.statusText;
-            noticeTitle.textContent = notification.title;
-            notice.title = `${notification.statusText}: ${notification.title}`;
-          }
+          notices.replaceChildren(
+            ...(message.notifications || []).map((notification) => {
+              const notice = document.createElement("button");
+              const status = document.createElement("span");
+              const title = document.createElement("span");
+              notice.type = "button";
+              notice.className = "notice";
+              notice.dataset.state = notification.state;
+              notice.title =
+                `${notification.statusText}: ${notification.title}`;
+              status.className = "notice-status";
+              status.textContent = notification.statusText;
+              title.className = "notice-title";
+              title.textContent = notification.title;
+              notice.append(status, title);
+              notice.addEventListener("click", () => {
+                window.webkit?.messageHandlers?.pet?.postMessage({
+                  id: notification.id,
+                  type: "notificationClick"
+                });
+              });
+              return notice;
+            })
+          );
         }
       };
     </script>

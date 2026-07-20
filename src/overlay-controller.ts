@@ -28,6 +28,7 @@ export class OverlayController {
   private snapshot: PetSnapshot = {
     activeCount: 0,
     failedCount: 0,
+    notifications: [],
     reviewCount: 0,
     state: "idle",
     waitingCount: 0

@@ -20,7 +20,7 @@ export interface PetNotification {
 export interface PetSnapshot {
   activeCount: number;
   failedCount: number;
-  notification?: PetNotification;
+  notifications: PetNotification[];
   reviewCount: number;
   state: PetState;
   waitingCount: number;
