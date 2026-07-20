@@ -113,6 +113,11 @@
         border-left-color: var(--warning);
       }
 
+      .notice[data-state="running"] {
+        padding-right: 48px;
+        border-left-color: var(--cyan);
+      }
+
       .notice[data-state="review"] {
         border-left-color: var(--success);
       }
@@ -141,6 +146,34 @@
         color: #c9c8d0;
         font-size: 12px;
         line-height: 16px;
+      }
+
+      .notice-buffer {
+        position: absolute;
+        top: 50%;
+        right: 14px;
+        display: inline-flex;
+        width: 22px;
+        height: 12px;
+        align-items: center;
+        justify-content: space-between;
+        transform: translateY(-50%);
+      }
+
+      .notice-buffer-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--cyan);
+        animation: notice-buffer 0.9s ease-in-out infinite;
+      }
+
+      .notice-buffer-dot:nth-child(2) {
+        animation-delay: 0.14s;
+      }
+
+      .notice-buffer-dot:nth-child(3) {
+        animation-delay: 0.28s;
       }
 
       .body {
@@ -360,6 +393,18 @@
         }
       }
 
+      @keyframes notice-buffer {
+        0%,
+        100% {
+          opacity: 0.35;
+          transform: translateY(0);
+        }
+        50% {
+          opacity: 1;
+          transform: translateY(-2px);
+        }
+      }
+
       @keyframes waiting {
         0%,
         100% {
@@ -399,7 +444,8 @@
       @media (prefers-reduced-motion: reduce) {
         #pet,
         .eye,
-        .work-dot {
+        .work-dot,
+        .notice-buffer-dot {
           animation-duration: 8s !important;
         }
       }
@@ -497,6 +543,17 @@
               title.className = "notice-title";
               title.textContent = notification.title;
               notice.append(status, title);
+              if (notification.state === "running") {
+                const buffer = document.createElement("span");
+                buffer.className = "notice-buffer";
+                buffer.setAttribute("aria-hidden", "true");
+                for (let index = 0; index < 3; index += 1) {
+                  const dot = document.createElement("span");
+                  dot.className = "notice-buffer-dot";
+                  buffer.append(dot);
+                }
+                notice.append(buffer);
+              }
               notice.addEventListener("click", () => {
                 window.webkit?.messageHandlers?.pet?.postMessage({
                   id: notification.id,

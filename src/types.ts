@@ -10,7 +10,7 @@ export type PetState = (typeof PET_STATES)[number];
 
 export type PetNotificationState = Exclude<
   PetState,
-  "idle" | "running"
+  "idle"
 >;
 
 export interface PetNotification {

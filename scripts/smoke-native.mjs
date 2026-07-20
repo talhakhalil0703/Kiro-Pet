@@ -145,7 +145,7 @@ try {
   const resizedWindow = await waitForWindow();
   if (
     resizedWindow.bounds.Width !== 340 ||
-    resizedWindow.bounds.Height !== 220
+    resizedWindow.bounds.Height !== 304
   ) {
     throw new Error(
       `Resize failed: ${JSON.stringify(resizedWindow.bounds)}`

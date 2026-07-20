@@ -622,9 +622,7 @@ private func combineSources(_ sources: [TimedSource]) -> OverlayCommand? {
 
     var notificationsById: [String: OverlayNotification] = [:]
     for source in sources.sorted(by: { $0.receivedAt < $1.receivedAt }) {
-        for notification in source.command.notifications ?? []
-            where notification.state != "running"
-        {
+        for notification in source.command.notifications ?? [] {
             notificationsById[notification.id] = OverlayNotification(
                 id: notification.id,
                 persistent: notification.persistent,

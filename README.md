@@ -13,9 +13,10 @@ windows:
 Multiple chats are aggregated with this priority: waiting, failed, running,
 review, idle. A badge shows concurrent activity.
 
-Running activity appears as a single status line beside Ghosty. Waiting, failed,
-and completed alerts form a vertical stack above it until each card is clicked.
-Every card is routed back to the Kiro window and chat session that created it.
+Every active chat appears in a vertical stack above Ghosty, with running chats
+showing an animated work indicator. Waiting, failed, and completed alerts remain
+until clicked. Every card is routed back to the Kiro window and chat session
+that created it.
 
 ## How Codex Pet Works
 
@@ -68,7 +69,7 @@ npm install
 npm test
 npm run package
 /Applications/Kiro.app/Contents/Resources/app/bin/code \
-  --install-extension kiro-pet-0.1.5.vsix
+  --install-extension kiro-pet-0.1.6.vsix
 ```
 
 Reload Kiro after installation. Use the **Kiro Pet** commands from the Command

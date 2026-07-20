@@ -82,7 +82,16 @@ test("maps a running turn to the running pet state", async (t) => {
 
   assert.equal(fixture.snapshots.at(-1)?.state, "running");
   assert.equal(fixture.snapshots.at(-1)?.activeCount, 1);
-  assert.deepEqual(fixture.snapshots.at(-1)?.notifications, []);
+  assert.deepEqual(fixture.snapshots.at(-1)?.notifications, [
+    {
+      id: "sess_test:idle:1",
+      persistent: false,
+      sessionId: "sess_test",
+      state: "running",
+      statusText: "Kiro is working",
+      title: "Test session"
+    }
+  ]);
 });
 
 test("holds review state after a turn ends", async (t) => {
@@ -130,6 +139,29 @@ test("prioritizes waiting over running chats", async (t) => {
   assert.equal(fixture.snapshots.at(-1)?.state, "waiting");
   assert.equal(fixture.snapshots.at(-1)?.activeCount, 2);
   assert.equal(fixture.snapshots.at(-1)?.waitingCount, 1);
+  assert.deepEqual(
+    fixture.snapshots
+      .at(-1)
+      ?.notifications.map((notification) => notification.state),
+    ["waiting", "running"]
+  );
+});
+
+test("keeps a running session visible after it is clicked", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => fixture.monitor.dispose());
+
+  await writeMetadata(fixture, "in_progress");
+  await fixture.monitor.scan();
+
+  const notification = fixture.snapshots.at(-1)?.notifications[0];
+  assert.equal(notification?.state, "running");
+  fixture.monitor.acknowledge(notification!.id);
+
+  assert.equal(
+    fixture.snapshots.at(-1)?.notifications[0]?.sessionId,
+    "sess_test"
+  );
 });
 
 test("ignores CLI sessions", async (t) => {
@@ -194,7 +226,10 @@ test("clears an old review alert when work resumes", async (t) => {
   await appendTurn(fixture, "start");
   await fixture.monitor.scan();
   assert.equal(fixture.snapshots.at(-1)?.state, "running");
-  assert.deepEqual(fixture.snapshots.at(-1)?.notifications, []);
+  assert.equal(
+    fixture.snapshots.at(-1)?.notifications[0]?.state,
+    "running"
+  );
 });
 
 test("filters sessions to the current workspace", async (t) => {

@@ -91,7 +91,10 @@ export class SessionMonitor {
         record,
         this.effectiveState(record, now)
       );
-      if (notification?.id === notificationId) {
+      if (
+        notification?.id === notificationId &&
+        notification.persistent
+      ) {
         record.acknowledgedKey = alertKey(record);
         record.pendingReviewKey = undefined;
       }
@@ -386,7 +389,8 @@ function selectNotifications(
   const priority: Record<PetNotification["state"], number> = {
     waiting: 0,
     failed: 1,
-    review: 2
+    running: 2,
+    review: 3
   };
   return candidates.sort(
     (left, right) => priority[left.state] - priority[right.state]
@@ -398,7 +402,9 @@ function notificationFor(
   state: PetState
 ): PetNotification | undefined {
   const notificationState =
-    state === "waiting" || state === "failed"
+    state === "running" ||
+    state === "waiting" ||
+    state === "failed"
       ? state
       : record.pendingReviewKey
         ? "review"
@@ -406,12 +412,16 @@ function notificationFor(
   if (!notificationState) {
     return undefined;
   }
-  if (record.acknowledgedKey === alertKey(record)) {
+  const persistent = notificationState !== "running";
+  if (
+    persistent &&
+    record.acknowledgedKey === alertKey(record)
+  ) {
     return undefined;
   }
   return {
     id: `${record.id}:${alertKey(record)}`,
-    persistent: true,
+    persistent,
     sessionId: record.id,
     state: notificationState,
     statusText: statusText(notificationState),
@@ -428,6 +438,8 @@ function alertKey(record: SessionRecord): string {
 
 function statusText(state: PetNotification["state"]): string {
   switch (state) {
+    case "running":
+      return "Kiro is working";
     case "waiting":
       return "Needs your input";
     case "failed":
