@@ -45,15 +45,15 @@ Kiro 1.0.138 persists IDE sessions under:
 ```
 
 `session.json` exposes the coarse states `in_progress`, `waiting_on_user`,
-`completed`, `idle`, and `failed`. `messages.jsonl` adds explicit `turn_start`
-and `turn_end` markers, which lets the pet react during a first turn before the
-metadata file exists.
+`completed`, `idle`, and `failed`. `messages.jsonl` adds explicit turn markers
+and pending-interaction records. These let the pet react during a first turn and
+show when a tool approval or user-input request is waiting even if the coarse
+session status remains `in_progress`.
 
-For Remote SSH workspaces, the extension reads session status and title from
-`session.json` through Kiro's existing `vscode-remote` filesystem connection.
-Locally, it also reads exact lifecycle marker text in the
-last 128 KiB of each transcript. It does not parse, retain, or transmit chat
-content. All communication stays on `127.0.0.1`.
+For Remote SSH workspaces, the extension reads the same lifecycle files through
+Kiro's existing `vscode-remote` filesystem connection. It inspects only
+lifecycle record types and interaction IDs from each transcript; it does not
+retain or transmit chat content. All communication stays on `127.0.0.1`.
 
 ## Build And Install
 
@@ -69,7 +69,7 @@ npm install
 npm test
 npm run package
 /Applications/Kiro.app/Contents/Resources/app/bin/code \
-  --install-extension kiro-pet-0.1.6.vsix
+  --install-extension kiro-pet-0.1.7.vsix
 ```
 
 Reload Kiro after installation. Use the **Kiro Pet** commands from the Command

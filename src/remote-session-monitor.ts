@@ -4,6 +4,14 @@ import type {
   PetSnapshot,
   PetState
 } from "./types";
+import {
+  applySessionEvents,
+  createSessionEventState,
+  latestPendingInteraction,
+  resetSessionEventState,
+  sessionEventReadWindow,
+  type SessionEventState
+} from "./session-events";
 import { matchesWorkspace } from "./workspace-paths";
 
 const ACTIVE_STALE_MS = 6 * 60 * 60 * 1000;
@@ -23,6 +31,10 @@ interface SessionRecord {
   failedUntil: number;
   id: string;
   initialized: boolean;
+  interactionMtimeMs: number;
+  lifecycle: SessionEventState;
+  markerMtimeMs: number;
+  messageSize: number;
   metadataMtimeMs: number;
   metadataStatus?: KiroStatus;
   pendingReviewKey?: string;
@@ -145,6 +157,10 @@ export class RemoteSessionMonitor {
         failedUntil: 0,
         id: directory.path.split("/").at(-1) ?? key,
         initialized: false,
+        interactionMtimeMs: 0,
+        lifecycle: createSessionEventState(),
+        markerMtimeMs: 0,
+        messageSize: -1,
         metadataMtimeMs: 0,
         reviewCandidateAt: 0,
         reviewUntil: 0,
@@ -232,8 +248,57 @@ export class RemoteSessionMonitor {
       }
     }
 
+    await this.readSessionEvents(directory, record);
     record.initialized = true;
     this.records.set(key, record);
+  }
+
+  private async readSessionEvents(
+    directory: vscode.Uri,
+    record: SessionRecord
+  ): Promise<void> {
+    const messagesUri = vscode.Uri.joinPath(directory, "messages.jsonl");
+    let fileStat: vscode.FileStat;
+    try {
+      fileStat = await vscode.workspace.fs.stat(messagesUri);
+    } catch (error) {
+      if (isNotFound(error)) {
+        return;
+      }
+      throw error;
+    }
+    if (fileStat.size === record.messageSize) {
+      return;
+    }
+
+    const window = sessionEventReadWindow(
+      record.messageSize,
+      fileStat.size
+    );
+    if (window.reset) {
+      resetSessionEventState(record.lifecycle);
+    }
+    const data = await vscode.workspace.fs.readFile(messagesUri);
+    const text = new TextDecoder().decode(data.subarray(window.start));
+    const update = applySessionEvents(
+      record.lifecycle,
+      text,
+      window.skipLeadingPartial
+    );
+    if (update.turnMarkerSeen) {
+      record.markerMtimeMs = fileStat.mtime;
+    }
+    if (update.interactionEventSeen) {
+      record.interactionMtimeMs = fileStat.mtime;
+    }
+    record.messageSize = data.byteLength;
+
+    if (
+      record.lifecycle.markerActive ||
+      record.lifecycle.pendingInteractions.size > 0
+    ) {
+      clearReview(record);
+    }
   }
 
   private emitSnapshot(): void {
@@ -318,24 +383,34 @@ function notificationFor(
     persistent,
     sessionId: record.id,
     state: notificationState,
-    statusText: statusText(notificationState),
+    statusText: statusText(record, notificationState),
     title: record.title
   };
 }
 
 function alertKey(record: SessionRecord): string {
+  const interaction = latestPendingInteraction(record.lifecycle);
+  if (interaction) {
+    return `interaction:${interaction.id}`;
+  }
   return (
     record.pendingReviewKey ??
     `${record.metadataStatus ?? "idle"}:${record.statusVersion}`
   );
 }
 
-function statusText(state: PetNotification["state"]): string {
+function statusText(
+  record: SessionRecord,
+  state: PetNotification["state"]
+): string {
   switch (state) {
     case "running":
       return "Kiro is working";
     case "waiting":
-      return "Needs your input";
+      return latestPendingInteraction(record.lifecycle)?.type ===
+        "tool_approval"
+        ? "Needs your approval"
+        : "Needs your input";
     case "failed":
       return "Chat failed";
     case "review":
@@ -350,6 +425,12 @@ function effectiveState(
 ): PetState {
   const metadataAge = now - record.metadataMtimeMs;
   if (
+    record.lifecycle.pendingInteractions.size > 0 &&
+    now - record.interactionMtimeMs < WAITING_STALE_MS
+  ) {
+    return "waiting";
+  }
+  if (
     record.metadataStatus === "waiting_on_user" &&
     metadataAge < WAITING_STALE_MS
   ) {
@@ -359,8 +440,10 @@ function effectiveState(
     return "failed";
   }
   if (
-    record.metadataStatus === "in_progress" &&
-    metadataAge < ACTIVE_STALE_MS
+    (record.lifecycle.markerActive &&
+      now - record.markerMtimeMs < ACTIVE_STALE_MS) ||
+    (record.metadataStatus === "in_progress" &&
+      metadataAge < ACTIVE_STALE_MS)
   ) {
     return "running";
   }

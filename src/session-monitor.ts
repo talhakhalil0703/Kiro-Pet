@@ -5,13 +5,19 @@ import type {
   PetSnapshot,
   PetState
 } from "./types";
+import {
+  applySessionEvents,
+  createSessionEventState,
+  latestPendingInteraction,
+  resetSessionEventState,
+  sessionEventReadWindow,
+  type SessionEventState
+} from "./session-events";
 import { matchesWorkspace } from "./workspace-paths";
 
-const MESSAGE_TAIL_BYTES = 128 * 1024;
 const ACTIVE_STALE_MS = 6 * 60 * 60 * 1000;
 const FAILED_HOLD_MS = 60 * 60 * 1000;
 const WAITING_STALE_MS = 24 * 60 * 60 * 1000;
-const TURN_MARKER = /"payload":\{"type":"turn_(start|end)"/g;
 
 type KiroStatus =
   | "completed"
@@ -26,7 +32,8 @@ interface SessionRecord {
   failedUntil: number;
   id: string;
   initialized: boolean;
-  markerActive: boolean;
+  interactionMtimeMs: number;
+  lifecycle: SessionEventState;
   markerMtimeMs: number;
   messageSize: number;
   metadataMtimeMs: number;
@@ -178,7 +185,8 @@ export class SessionMonitor {
         failedUntil: 0,
         id: path.basename(directory),
         initialized: false,
-        markerActive: false,
+        interactionMtimeMs: 0,
+        lifecycle: createSessionEventState(),
         markerMtimeMs: 0,
         messageSize: -1,
         metadataMtimeMs: 0,
@@ -192,7 +200,7 @@ export class SessionMonitor {
 
     await Promise.all([
       this.readMetadata(record),
-      this.readTurnMarkers(record)
+      this.readSessionEvents(record)
     ]);
     record.initialized = true;
     this.records.set(directory, record);
@@ -271,7 +279,7 @@ export class SessionMonitor {
     }
   }
 
-  private async readTurnMarkers(record: SessionRecord): Promise<void> {
+  private async readSessionEvents(record: SessionRecord): Promise<void> {
     const messagesPath = path.join(record.directory, "messages.jsonl");
     let stat: import("node:fs").Stats;
     try {
@@ -287,7 +295,11 @@ export class SessionMonitor {
       return;
     }
 
-    const start = Math.max(0, stat.size - MESSAGE_TAIL_BYTES);
+    const window = sessionEventReadWindow(record.messageSize, stat.size);
+    if (window.reset) {
+      resetSessionEventState(record.lifecycle);
+    }
+    const start = window.start;
     const length = stat.size - start;
     const handle = await fs.open(messagesPath, "r");
     let text: string;
@@ -299,21 +311,31 @@ export class SessionMonitor {
       await handle.close();
     }
 
-    let lastMarker: "end" | "start" | undefined;
-    for (const match of text.matchAll(TURN_MARKER)) {
-      lastMarker = match[1] as "end" | "start";
-    }
-    const previousActive = record.markerActive;
-    if (lastMarker) {
-      record.markerActive = lastMarker === "start";
+    const previousActive = record.lifecycle.markerActive;
+    const update = applySessionEvents(
+      record.lifecycle,
+      text,
+      window.skipLeadingPartial
+    );
+    if (update.turnMarkerSeen) {
       record.markerMtimeMs = stat.mtimeMs;
+    }
+    if (update.interactionEventSeen) {
+      record.interactionMtimeMs = stat.mtimeMs;
     }
     record.messageSize = stat.size;
 
-    if (record.markerActive) {
+    if (
+      record.lifecycle.markerActive ||
+      record.lifecycle.pendingInteractions.size > 0
+    ) {
       clearReview(record);
     }
-    if (record.initialized && previousActive && !record.markerActive) {
+    if (
+      record.initialized &&
+      previousActive &&
+      !record.lifecycle.markerActive
+    ) {
       record.reviewUntil = this.now() + this.reviewDurationMs;
       record.pendingReviewKey = `review:${stat.mtimeMs}`;
     }
@@ -350,6 +372,12 @@ export class SessionMonitor {
   private effectiveState(record: SessionRecord, now: number): PetState {
     const metadataAge = now - record.metadataMtimeMs;
     if (
+      record.lifecycle.pendingInteractions.size > 0 &&
+      now - record.interactionMtimeMs < WAITING_STALE_MS
+    ) {
+      return "waiting";
+    }
+    if (
       record.metadataStatus === "waiting_on_user" &&
       metadataAge < WAITING_STALE_MS
     ) {
@@ -362,7 +390,8 @@ export class SessionMonitor {
       return "failed";
     }
     if (
-      (record.markerActive && now - record.markerMtimeMs < ACTIVE_STALE_MS) ||
+      (record.lifecycle.markerActive &&
+        now - record.markerMtimeMs < ACTIVE_STALE_MS) ||
       (record.metadataStatus === "in_progress" &&
         metadataAge < ACTIVE_STALE_MS)
     ) {
@@ -424,24 +453,34 @@ function notificationFor(
     persistent,
     sessionId: record.id,
     state: notificationState,
-    statusText: statusText(notificationState),
+    statusText: statusText(record, notificationState),
     title: record.title
   };
 }
 
 function alertKey(record: SessionRecord): string {
+  const interaction = latestPendingInteraction(record.lifecycle);
+  if (interaction) {
+    return `interaction:${interaction.id}`;
+  }
   return (
     record.pendingReviewKey ??
     `${record.metadataStatus ?? "idle"}:${record.statusVersion}`
   );
 }
 
-function statusText(state: PetNotification["state"]): string {
+function statusText(
+  record: SessionRecord,
+  state: PetNotification["state"]
+): string {
   switch (state) {
     case "running":
       return "Kiro is working";
     case "waiting":
-      return "Needs your input";
+      return latestPendingInteraction(record.lifecycle)?.type ===
+        "tool_approval"
+        ? "Needs your approval"
+        : "Needs your input";
     case "failed":
       return "Chat failed";
     case "review":

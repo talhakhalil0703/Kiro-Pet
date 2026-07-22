@@ -72,6 +72,37 @@ async function appendTurn(
   );
 }
 
+async function appendInteraction(
+  fixture: Fixture,
+  type: "pending_interaction" | "interaction_resolved",
+  toolCallId: string,
+  interactionType: "tool_approval" | "user_input" = "tool_approval"
+): Promise<void> {
+  await fs.appendFile(
+    fixture.messagesPath,
+    `${JSON.stringify({
+      id: `${toolCallId}-${type}`,
+      timestamp: new Date(fixture.now.value).toISOString(),
+      payload:
+        type === "pending_interaction"
+          ? {
+              executionId: "exec_test",
+              interactionType,
+              options: [],
+              question: "Allow this operation?",
+              toolCallId,
+              type
+            }
+          : {
+              executionId: "exec_test",
+              outcome: "selected",
+              toolCallId,
+              type
+            }
+    })}\n`
+  );
+}
+
 test("maps a running turn to the running pet state", async (t) => {
   const fixture = await createFixture();
   t.after(() => fixture.monitor.dispose());
@@ -161,6 +192,73 @@ test("keeps a running session visible after it is clicked", async (t) => {
   assert.equal(
     fixture.snapshots.at(-1)?.notifications[0]?.sessionId,
     "sess_test"
+  );
+});
+
+test("detects unresolved approval interactions", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => fixture.monitor.dispose());
+
+  await writeMetadata(fixture, "in_progress");
+  await appendTurn(fixture, "start");
+  await fixture.monitor.scan();
+
+  await appendInteraction(
+    fixture,
+    "pending_interaction",
+    "tool_call_1"
+  );
+  await fixture.monitor.scan();
+
+  const approval = fixture.snapshots.at(-1)?.notifications[0];
+  assert.equal(fixture.snapshots.at(-1)?.state, "waiting");
+  assert.equal(approval?.statusText, "Needs your approval");
+  assert.equal(
+    approval?.id,
+    "sess_test:interaction:tool_call_1"
+  );
+
+  fixture.monitor.acknowledge(approval!.id);
+  assert.deepEqual(fixture.snapshots.at(-1)?.notifications, []);
+
+  await appendInteraction(
+    fixture,
+    "interaction_resolved",
+    "tool_call_1"
+  );
+  await fixture.monitor.scan();
+  assert.equal(fixture.snapshots.at(-1)?.state, "running");
+
+  await appendInteraction(
+    fixture,
+    "pending_interaction",
+    "tool_call_2"
+  );
+  await fixture.monitor.scan();
+  assert.equal(fixture.snapshots.at(-1)?.state, "waiting");
+  assert.equal(
+    fixture.snapshots.at(-1)?.notifications[0]?.id,
+    "sess_test:interaction:tool_call_2"
+  );
+});
+
+test("labels explicit user-input interactions", async (t) => {
+  const fixture = await createFixture();
+  t.after(() => fixture.monitor.dispose());
+
+  await writeMetadata(fixture, "in_progress");
+  await appendInteraction(
+    fixture,
+    "pending_interaction",
+    "user_input_1",
+    "user_input"
+  );
+  await fixture.monitor.scan();
+
+  assert.equal(fixture.snapshots.at(-1)?.state, "waiting");
+  assert.equal(
+    fixture.snapshots.at(-1)?.notifications[0]?.statusText,
+    "Needs your input"
   );
 });
 
