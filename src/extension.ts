@@ -38,11 +38,15 @@ export async function activate(
   const workspaceUri =
     workspaceFolders[0]?.uri.toString(true) ??
     vscode.workspace.workspaceFile?.toString(true);
+  const workspaceName =
+    vscode.workspace.name?.trim() ||
+    workspaceFolders[0]?.name.trim();
   overlay = new OverlayController(
     context,
     output,
     sourceId,
     workspaceUri,
+    workspaceName,
     async (notificationId, sessionId, title) => {
       await vscode.commands.executeCommand(
         "kiroAgent.viewSession",

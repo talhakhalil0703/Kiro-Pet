@@ -20,6 +20,7 @@ private struct OverlayCommand: Codable {
     let notifications: [OverlayNotification]?
     let callbackPort: Int?
     let sourceId: String?
+    let workspaceName: String?
     let workspaceUri: String?
 }
 
@@ -32,6 +33,7 @@ private struct OverlayNotification: Codable {
     let title: String
     let callbackPort: Int?
     let sourceId: String?
+    let workspaceName: String?
     let workspaceUri: String?
 }
 
@@ -632,6 +634,7 @@ private func combineSources(_ sources: [TimedSource]) -> OverlayCommand? {
                 title: notification.title,
                 callbackPort: source.command.callbackPort,
                 sourceId: source.command.sourceId,
+                workspaceName: source.command.workspaceName,
                 workspaceUri: source.command.workspaceUri
             )
         }
@@ -660,7 +663,7 @@ private func combineSources(_ sources: [TimedSource]) -> OverlayCommand? {
         showActiveCount: latestCommand.showActiveCount,
         size: latestCommand.size,
         htmlPath: latestCommand.htmlPath,
-        label: combinedLabel(
+        label: combinedWorkspaceLabel(commands) ?? combinedLabel(
             state: state,
             activeCount: activeCount,
             failedCount: failedCount,
@@ -669,8 +672,29 @@ private func combineSources(_ sources: [TimedSource]) -> OverlayCommand? {
         notifications: notifications,
         callbackPort: nil,
         sourceId: nil,
+        workspaceName: nil,
         workspaceUri: nil
     )
+}
+
+private func combinedWorkspaceLabel(
+    _ commands: [OverlayCommand]
+) -> String? {
+    var seen: Set<String> = []
+    let names = commands.compactMap { command -> String? in
+        guard let workspaceName = command.workspaceName?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !workspaceName.isEmpty
+        else { return nil }
+
+        let key = workspaceName.lowercased()
+        guard seen.insert(key).inserted else { return nil }
+        return workspaceName
+    }.sorted {
+        $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+    }
+
+    return names.isEmpty ? nil : names.joined(separator: ", ")
 }
 
 private func aggregateCount(

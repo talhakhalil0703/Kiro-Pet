@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test from "node:test";
+import { workspaceLabel } from "../src/overlay-controller";
 import { SessionMonitor } from "../src/session-monitor";
 import type { PetSnapshot } from "../src/types";
 
@@ -13,6 +14,20 @@ interface Fixture {
   sessionPath: string;
   snapshots: PetSnapshot[];
 }
+
+test("uses the workspace name for the overlay label", () => {
+  const snapshot: PetSnapshot = {
+    activeCount: 1,
+    failedCount: 0,
+    notifications: [],
+    reviewCount: 0,
+    state: "running",
+    waitingCount: 0
+  };
+
+  assert.equal(workspaceLabel(snapshot, " Dtypes "), "Dtypes");
+  assert.equal(workspaceLabel(snapshot, undefined), "Kiro is working");
+});
 
 async function createFixture(
   reviewDurationMs = 5_000,

@@ -69,7 +69,7 @@ npm install
 npm test
 npm run package
 /Applications/Kiro.app/Contents/Resources/app/bin/code \
-  --install-extension kiro-pet-0.1.7.vsix
+  --install-extension kiro-pet-0.1.8.vsix
 ```
 
 Reload Kiro after installation. Use the **Kiro Pet** commands from the Command

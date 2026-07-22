@@ -118,15 +118,23 @@ try {
   }
 
   currentMessages = [
-    makeState(states[2]),
-    makeState(states[3], { sourceId: "workspace:review" })
+    makeState(states[2], { workspaceName: "Dtypes" }),
+    makeState(states[3], {
+      sourceId: "workspace:review",
+      workspaceName: "ContinueSingleStep"
+    }),
+    makeState(states[0], {
+      sourceId: "workspace:idle",
+      workspaceName: "BranchPrefetchHint"
+    })
   ];
   await sendAll(currentMessages);
   await delay(250);
   const combinedWindow = await waitForWindow();
   if (
     combinedWindow.bounds.Height !== 364 ||
-    combinedWindow.title !== "2 chats need you"
+    combinedWindow.title !==
+      "BranchPrefetchHint, ContinueSingleStep, Dtypes"
   ) {
     throw new Error(
       `Source aggregation failed: ${JSON.stringify(combinedWindow)}`
@@ -273,6 +281,7 @@ function makeState(state, overrides = {}) {
     sourceId: "workspace:smoke",
     type: "state",
     version: 2,
+    workspaceName: "SmokeWorkspace",
     workspaceUri: "file:///tmp/kiro-pet-smoke",
     notifications,
     ...overrides

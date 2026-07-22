@@ -539,7 +539,9 @@
               notice.title =
                 `${notification.statusText}: ${notification.title}`;
               status.className = "notice-status";
-              status.textContent = notification.statusText;
+              status.textContent =
+                notification.workspaceName?.trim() ||
+                notification.statusText;
               title.className = "notice-title";
               title.textContent = notification.title;
               notice.append(status, title);

@@ -17,6 +17,7 @@ interface OverlayMessage extends OverlaySettings, PetSnapshot {
   sourceId: string;
   type: "state";
   version: 2;
+  workspaceName?: string;
   workspaceUri?: string;
 }
 
@@ -58,6 +59,7 @@ export class OverlayController {
     private readonly output: OutputChannel,
     private readonly sourceId: string,
     private readonly workspaceUri: string | undefined,
+    private readonly workspaceName: string | undefined,
     private readonly onNotificationClick: (
       notificationId: string,
       sessionId: string,
@@ -172,7 +174,7 @@ export class OverlayController {
     if (this.callbackPort === undefined) {
       return;
     }
-    const label = stateLabel(this.snapshot);
+    const label = workspaceLabel(this.snapshot, this.workspaceName);
     const message: OverlayMessage = {
       ...this.snapshot,
       ...this.settings,
@@ -182,6 +184,7 @@ export class OverlayController {
       sourceId: this.sourceId,
       type: "state",
       version: 2,
+      workspaceName: this.workspaceName,
       workspaceUri: this.workspaceUri
     };
     this.send(message);
@@ -277,4 +280,11 @@ export function stateLabel(snapshot: PetSnapshot): string {
     case "idle":
       return "Kiro Pet is idle";
   }
+}
+
+export function workspaceLabel(
+  snapshot: PetSnapshot,
+  workspaceName: string | undefined
+): string {
+  return workspaceName?.trim() || stateLabel(snapshot);
 }
